@@ -1,4 +1,11 @@
 import { buildSkillsPrompt, DEFAULT_INTERVIEWER_SKILLS } from "@/lib/assistant/interviewer-skills";
+import {
+  describeCodingStage,
+  inferSuggestedCodingStage,
+  isCodingInterviewStage,
+  stageGuidance,
+  type CodingInterviewStage,
+} from "@/lib/assistant/stages";
 
 type TranscriptLike = {
   speaker: "USER" | "AI" | "SYSTEM";
@@ -19,6 +26,7 @@ type GenerateAssistantTurnInput = {
   selectedLanguage?: string | null;
   personaSummary?: string | null;
   appliedPromptContext?: string | null;
+  currentStage?: string | null;
   recentTranscripts: TranscriptLike[];
   latestExecutionRun?: ExecutionRunLike | null;
 };
@@ -27,6 +35,11 @@ type GenerateAssistantTurnResult = {
   reply: string;
   suggestedStage?: string;
   source: "fallback" | "openai" | "gemini";
+};
+
+export type StreamingAssistantTurnChunk = {
+  textDelta?: string;
+  final?: GenerateAssistantTurnResult;
 };
 
 export async function generateAssistantTurn(
@@ -57,6 +70,38 @@ export async function generateAssistantTurn(
   }
 
   return generateFallbackTurn(input);
+}
+
+export async function* streamAssistantTurn(
+  input: GenerateAssistantTurnInput,
+  options?: { signal?: AbortSignal },
+): AsyncGenerator<StreamingAssistantTurnChunk> {
+  const provider = resolveProvider();
+
+  if (provider === "gemini" && process.env.GEMINI_API_KEY) {
+    const stream = streamWithGemini(input, options);
+    if (stream) {
+      yield* stream;
+      return;
+    }
+  }
+
+  if ((provider === "openai" || process.env.OPENAI_API_KEY) && process.env.OPENAI_API_KEY) {
+    const stream = streamWithOpenAI(input, options);
+    if (stream) {
+      yield* stream;
+      return;
+    }
+  }
+
+  const fallback = generateFallbackTurn(input);
+  for (const chunk of chunkText(fallback.reply)) {
+    if (options?.signal?.aborted) {
+      return;
+    }
+    yield { textDelta: chunk };
+  }
+  yield { final: fallback };
 }
 
 function resolveProvider() {
@@ -118,8 +163,87 @@ async function generateWithOpenAI(
 
   return {
     reply: finalizeReply(reply),
-    suggestedStage: inferStage(reply),
+    suggestedStage: inferStage(reply, input),
     source: "openai",
+  };
+}
+
+async function* streamWithOpenAI(
+  input: GenerateAssistantTurnInput,
+  options?: { signal?: AbortSignal },
+): AsyncGenerator<StreamingAssistantTurnChunk> {
+  const model = process.env.OPENAI_MODEL ?? "gpt-4.1-mini";
+  const prompt = buildInterviewerPrompt(input);
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      stream: true,
+      input: [
+        {
+          role: "system",
+          content: [{ type: "input_text", text: buildSystemPrompt() }],
+        },
+        {
+          role: "user",
+          content: [{ type: "input_text", text: prompt }],
+        },
+      ],
+    }),
+    signal: options?.signal,
+  }).catch(() => null);
+
+  if (!response?.ok || !response.body) {
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let accumulated = "";
+
+  while (true) {
+    if (options?.signal?.aborted) {
+      return;
+    }
+
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const rawEvents = buffer.split("\n\n");
+    buffer = rawEvents.pop() ?? "";
+
+    for (const rawEvent of rawEvents) {
+      const parsed = parseSseEvent(rawEvent);
+      if (!parsed) {
+        continue;
+      }
+
+      if (parsed.type === "response.output_text.delta" && typeof parsed.payload?.delta === "string") {
+        accumulated += parsed.payload.delta;
+        yield { textDelta: parsed.payload.delta };
+      }
+    }
+  }
+
+  if (!accumulated.trim()) {
+    return;
+  }
+
+  const final = finalizeReply(accumulated);
+  yield {
+    final: {
+      reply: final,
+      suggestedStage: inferStage(final, input),
+      source: "openai",
+    },
   };
 }
 
@@ -174,8 +298,93 @@ async function generateWithGemini(
 
   return {
     reply: finalizeReply(reply),
-    suggestedStage: inferStage(reply),
+    suggestedStage: inferStage(reply, input),
     source: "gemini",
+  };
+}
+
+async function* streamWithGemini(
+  input: GenerateAssistantTurnInput,
+  options?: { signal?: AbortSignal },
+): AsyncGenerator<StreamingAssistantTurnChunk> {
+  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": process.env.GEMINI_API_KEY ?? "",
+      },
+      body: JSON.stringify({
+        systemInstruction: {
+          parts: [{ text: buildSystemPrompt() }],
+        },
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: buildInterviewerPrompt(input) }],
+          },
+        ],
+        generationConfig: {
+          temperature: 0.5,
+          maxOutputTokens: 320,
+        },
+      }),
+      signal: options?.signal,
+    },
+  ).catch(() => null);
+
+  if (!response?.ok || !response.body) {
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let accumulated = "";
+
+  while (true) {
+    if (options?.signal?.aborted) {
+      return;
+    }
+
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const rawEvents = buffer.split("\n\n");
+    buffer = rawEvents.pop() ?? "";
+
+    for (const rawEvent of rawEvents) {
+      const parsed = parseSseEvent(rawEvent);
+      if (!parsed) {
+        continue;
+      }
+
+      const textDelta = extractGeminiText(parsed.payload);
+      if (!textDelta) {
+        continue;
+      }
+
+      accumulated += textDelta;
+      yield { textDelta };
+    }
+  }
+
+  if (!accumulated.trim()) {
+    return;
+  }
+
+  const final = finalizeReply(accumulated);
+  yield {
+    final: {
+      reply: final,
+      suggestedStage: inferStage(final, input),
+      source: "gemini",
+    },
   };
 }
 
@@ -195,6 +404,7 @@ function buildSystemPrompt() {
 }
 
 function buildInterviewerPrompt(input: GenerateAssistantTurnInput) {
+  const stage = isCodingInterviewStage(input.currentStage) ? input.currentStage : "PROBLEM_UNDERSTANDING";
   const recentTurns = input.recentTranscripts
     .slice(-6)
     .map((item) => `${item.speaker}: ${item.text}`)
@@ -206,6 +416,8 @@ function buildInterviewerPrompt(input: GenerateAssistantTurnInput) {
     `Prompt: ${input.questionPrompt}`,
     `Target level: ${input.targetLevel ?? "unspecified"}`,
     `Language: ${input.selectedLanguage ?? "unspecified"}`,
+    `Current interview stage: ${describeCodingStage(stage)} (${stage})`,
+    `Stage guidance: ${stageGuidance(stage)}`,
     `Persona summary: ${input.personaSummary ?? "generic interviewer"}`,
     `Applied prompt context: ${input.appliedPromptContext ?? "none"}`,
     input.latestExecutionRun
@@ -215,6 +427,7 @@ function buildInterviewerPrompt(input: GenerateAssistantTurnInput) {
     `Latest user turn: ${findLatestTurn(input.recentTranscripts, "USER") ?? "none"}`,
     `Recent conversation:\n${recentTurns || "No turns yet."}`,
     "Write the interviewer's next single reply.",
+    "Advance the interview deliberately. Stay in the current stage unless there is a clear reason to move forward.",
     "Do not repeat the previous AI sentence verbatim.",
   ].join("\n\n");
 }
@@ -223,6 +436,9 @@ function generateFallbackTurn(input: GenerateAssistantTurnInput): GenerateAssist
   const latestUserTurn = [...input.recentTranscripts].reverse().find((item) => item.speaker === "USER");
   const latestAiTurn = [...input.recentTranscripts].reverse().find((item) => item.speaker === "AI");
   const latestRun = input.latestExecutionRun;
+  const currentStage: CodingInterviewStage = isCodingInterviewStage(input.currentStage)
+    ? input.currentStage
+    : "PROBLEM_UNDERSTANDING";
 
   if (!latestUserTurn && !latestAiTurn) {
     return {
@@ -271,6 +487,30 @@ function generateFallbackTurn(input: GenerateAssistantTurnInput): GenerateAssist
   const latestUserText = latestUserTurn?.text.toLowerCase() ?? "";
   const wordCount = latestUserText.split(/\s+/).filter(Boolean).length;
 
+  if (currentStage === "PROBLEM_UNDERSTANDING") {
+    if (/\b(hash map|two pointers|sort|stack|queue|binary search|dfs|bfs)\b/.test(latestUserText)) {
+      return {
+        reply: withVariation(
+          "Good, that's a reasonable starting point. Walk me through one small example so I can see how that approach plays out step by step.",
+          latestAiTurn?.text,
+          "Okay, that sounds plausible. Use one concrete example and show me how your idea would evolve across the input.",
+        ),
+        suggestedStage: "APPROACH_DISCUSSION",
+        source: "fallback",
+      };
+    }
+
+    return {
+      reply: withVariation(
+        "Before we lock in an approach, what constraints or edge conditions matter most here, and how are you interpreting the expected output?",
+        latestAiTurn?.text,
+        "Let's stay on problem framing for a moment. What assumptions are you making about the input, and what would count as a correct output?",
+      ),
+      suggestedStage: "PROBLEM_UNDERSTANDING",
+      source: "fallback",
+    };
+  }
+
   if (latestUserText.includes("stuck") || latestUserText.includes("not sure") || latestUserText.includes("don't know")) {
     return {
       reply: withVariation(
@@ -303,11 +543,15 @@ function generateFallbackTurn(input: GenerateAssistantTurnInput): GenerateAssist
   ) {
     return {
       reply: withVariation(
-        "That sounds like a reasonable direction. Walk me through one concrete example and then tell me the expected time and space complexity.",
+        currentStage === "IMPLEMENTATION"
+          ? "That approach sounds reasonable. As you code it, call out the core loop and any invariant that keeps the implementation correct."
+          : "That sounds like a reasonable direction. Walk me through one concrete example and then tell me the expected time and space complexity.",
         latestAiTurn?.text,
-        "Okay, that direction makes sense. Can you step through one example and explain why the data structure choice helps?",
+        currentStage === "IMPLEMENTATION"
+          ? "Okay, keep going at the implementation level. Which variables or pointers are carrying the key state, and how do they change over time?"
+          : "Okay, that direction makes sense. Can you step through one example and explain why the data structure choice helps?",
       ),
-      suggestedStage: "APPROACH_DISCUSSION",
+      suggestedStage: currentStage === "IMPLEMENTATION" ? "IMPLEMENTATION" : "APPROACH_DISCUSSION",
       source: "fallback",
     };
   }
@@ -320,6 +564,30 @@ function generateFallbackTurn(input: GenerateAssistantTurnInput): GenerateAssist
         "That covers complexity. Now help me believe the solution is correct: what invariant or edge case would you use to validate it?",
       ),
       suggestedStage: "CORRECTNESS_DISCUSSION",
+      source: "fallback",
+    };
+  }
+
+  if (currentStage === "IMPLEMENTATION") {
+    return {
+      reply: withVariation(
+        "Keep implementing, but narrate the key branches as you go. What is the trickiest line or condition in this solution?",
+        latestAiTurn?.text,
+        "As you write the code, focus on the part that's easiest to get wrong. Which branch or pointer update deserves the most care?",
+      ),
+      suggestedStage: "IMPLEMENTATION",
+      source: "fallback",
+    };
+  }
+
+  if (currentStage === "TESTING_AND_COMPLEXITY") {
+    return {
+      reply: withVariation(
+        "Let's close the loop on validation. Which edge cases would you run, and what are the final time and space complexities?",
+        latestAiTurn?.text,
+        "Before we wrap, give me the edge cases you care about most and the final time and space complexity.",
+      ),
+      suggestedStage: "TESTING_AND_COMPLEXITY",
       source: "fallback",
     };
   }
@@ -338,21 +606,26 @@ function generateFallbackTurn(input: GenerateAssistantTurnInput): GenerateAssist
 
   return {
     reply: withVariation(
-      "Keep going. Explain your approach step by step, and make sure you call out assumptions, edge cases, and the tradeoff behind your design choice.",
+      currentStage === "WRAP_UP"
+        ? "Wrap this up for me. What's the final approach, what are the tradeoffs, and what small improvement would you make with more time?"
+        : "Keep going. Explain your approach step by step, and make sure you call out assumptions, edge cases, and the tradeoff behind your design choice.",
       latestAiTurn?.text,
-      "You're heading in a reasonable direction. Keep walking me through it step by step, and be explicit about assumptions and tradeoffs.",
+      currentStage === "WRAP_UP"
+        ? "Give me a concise final summary: core idea, complexity, and one follow-up improvement you would consider."
+        : "You're heading in a reasonable direction. Keep walking me through it step by step, and be explicit about assumptions and tradeoffs.",
     ),
-    suggestedStage: "APPROACH_DISCUSSION",
+    suggestedStage: currentStage === "WRAP_UP" ? "WRAP_UP" : "APPROACH_DISCUSSION",
     source: "fallback",
   };
 }
 
-function inferStage(reply: string) {
-  const text = reply.toLowerCase();
-  if (text.includes("complexity")) return "COMPLEXITY_DISCUSSION";
-  if (text.includes("edge case") || text.includes("correct")) return "CORRECTNESS_DISCUSSION";
-  if (text.includes("hint") || text.includes("data structure")) return "HINTING";
-  return "APPROACH_DISCUSSION";
+function inferStage(reply: string, input: GenerateAssistantTurnInput) {
+  return inferSuggestedCodingStage({
+    currentStage: input.currentStage,
+    latestExecutionRun: input.latestExecutionRun,
+    latestUserTurn: findLatestTurn(input.recentTranscripts, "USER"),
+    reply,
+  });
 }
 
 function truncate(value: string, maxLength: number) {
@@ -411,4 +684,62 @@ function withVariation(primary: string, previousAiTurn?: string, alternate?: str
   }
 
   return primary;
+}
+
+function* chunkText(text: string) {
+  const parts = text.split(/(\s+)/).filter(Boolean);
+  let buffer = "";
+
+  for (const part of parts) {
+    buffer += part;
+    const wordCount = buffer.trim().split(/\s+/).filter(Boolean).length;
+    if (/[.!?]["']?$/.test(part) || wordCount >= 5) {
+      yield buffer;
+      buffer = "";
+    }
+  }
+
+  if (buffer.trim()) {
+    yield buffer;
+  }
+}
+
+function parseSseEvent(rawEvent: string) {
+  const lines = rawEvent.split("\n");
+  let payloadLine = "";
+
+  for (const line of lines) {
+    if (line.startsWith("data:")) {
+      payloadLine += line.slice(5).trim();
+    }
+  }
+
+  if (!payloadLine || payloadLine === "[DONE]") {
+    return null;
+  }
+
+  try {
+    const payload = JSON.parse(payloadLine) as Record<string, unknown>;
+    return {
+      type: typeof payload.type === "string" ? payload.type : "message",
+      payload,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function extractGeminiText(payload: Record<string, unknown>) {
+  const candidates = payload.candidates;
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return "";
+  }
+
+  const firstCandidate = candidates[0] as { content?: { parts?: Array<{ text?: string }> } };
+  const parts = firstCandidate.content?.parts;
+  if (!Array.isArray(parts) || parts.length === 0) {
+    return "";
+  }
+
+  return parts.map((part) => part.text ?? "").join("");
 }

@@ -2,9 +2,20 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  deriveCurrentCodingStage,
+  describeCodingStage,
+  isCodingInterviewStage,
+  type CodingInterviewStage,
+} from "@/lib/assistant/stages";
 import { getStarterCode, isRunnableLanguage, normalizeLanguage, toMonacoLanguage } from "@/lib/interview/editor";
 import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
 import { BrowserVoiceAdapter } from "@/lib/voice/browser-voice-adapter";
+import {
+  getAutoSubmitDelayMs,
+  getFinalChunkCommitDelayMs,
+  shouldIgnoreInterruptedUtterance,
+} from "@/lib/voice/turn-taking";
 import type { BrowserVoiceState, InterviewVoiceAdapter, VoiceAvailability } from "@/lib/voice/types";
 import { describeVoiceState } from "@/lib/voice/voice-status";
 
@@ -63,6 +74,7 @@ type InterviewRoomClientProps = {
   personaEnabled: boolean;
   personaSummary: string | null;
   appliedPromptContext: string | null;
+  initialStage: CodingInterviewStage;
   initialTranscripts: TranscriptSegment[];
   initialEvents: SessionEvent[];
 };
@@ -100,7 +112,17 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
   );
   const [candidateMessage, setCandidateMessage] = useState("");
   const [isAssistantThinking, setIsAssistantThinking] = useState(false);
+  const [assistantDraft, setAssistantDraft] = useState("");
+  const [roomNotice, setRoomNotice] = useState("Continuous listening is available when your browser supports speech recognition.");
+  const [isContinuousListening, setIsContinuousListening] = useState(false);
+  const [lastInterruptionAt, setLastInterruptionAt] = useState<string | null>(null);
   const voiceAdapterRef = useRef<InterviewVoiceAdapter | null>(null);
+  const assistantStreamAbortRef = useRef<AbortController | null>(null);
+  const silenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finalTranscriptTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const interruptionCooldownUntilRef = useRef<number>(0);
+  const interruptionNoticeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSubmittedCandidateTextRef = useRef("");
 
   useEffect(() => {
     let cancelled = false;
@@ -158,13 +180,21 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
 
   useEffect(() => {
     const adapter = new BrowserVoiceAdapter({
+      onSpeechStart: () => {
+        void interruptAiTurn("candidate_speech");
+      },
       onTranscript: (chunk) => {
         setDraftTranscript(chunk.isFinal ? "" : chunk.text);
         setVoiceState(chunk.isFinal ? "processing" : "listening");
 
         if (chunk.isFinal) {
-          void handleCandidateMessage(chunk.text);
+          clearSilenceTimer();
+          scheduleFinalTranscriptSubmit(chunk.text);
+          return;
         }
+
+        clearPendingFinalTranscript();
+        scheduleSilenceSubmit(chunk.text);
       },
       onStateChange: (state) => {
         setVoiceState(state);
@@ -178,6 +208,9 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
     setVoiceAvailability(adapter.getAvailability());
 
     return () => {
+      clearSilenceTimer();
+      clearPendingFinalTranscript();
+      clearInterruptionNoticeTimer();
       adapter.dispose();
       voiceAdapterRef.current = null;
     };
@@ -190,6 +223,17 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
   }, [events]);
 
   const latestRun = executionRuns[0] ?? null;
+  const currentStage = useMemo(() => {
+    if (events.length === 0 && transcripts.length === 0 && !latestRun) {
+      return props.initialStage;
+    }
+
+    return deriveCurrentCodingStage({
+      events,
+      transcripts,
+      latestExecutionRun: latestRun,
+    });
+  }, [events, latestRun, props.initialStage, transcripts]);
 
   function runAction(action: () => Promise<void>) {
     setActionError(null);
@@ -198,6 +242,87 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
         setActionError(error instanceof Error ? error.message : "Unknown action failure");
       });
     });
+  }
+
+  function clearSilenceTimer() {
+    if (silenceTimeoutRef.current) {
+      clearTimeout(silenceTimeoutRef.current);
+      silenceTimeoutRef.current = null;
+    }
+  }
+
+  function clearPendingFinalTranscript() {
+    if (finalTranscriptTimeoutRef.current) {
+      clearTimeout(finalTranscriptTimeoutRef.current);
+      finalTranscriptTimeoutRef.current = null;
+    }
+  }
+
+  function clearInterruptionNoticeTimer() {
+    if (interruptionNoticeTimeoutRef.current) {
+      clearTimeout(interruptionNoticeTimeoutRef.current);
+      interruptionNoticeTimeoutRef.current = null;
+    }
+  }
+
+  function interruptedRecently() {
+    return Date.now() < interruptionCooldownUntilRef.current;
+  }
+
+  function scheduleSilenceSubmit(text: string) {
+    clearSilenceTimer();
+    if (!isContinuousListening || !text.trim()) {
+      return;
+    }
+
+    const delayMs = getAutoSubmitDelayMs({
+      text,
+      interruptedRecently: interruptedRecently(),
+    });
+
+    if (delayMs === null) {
+      return;
+    }
+
+    silenceTimeoutRef.current = setTimeout(() => {
+      const stableText = text.trim();
+      if (!stableText) {
+        return;
+      }
+
+      const normalized = normalizeCandidateText(stableText);
+      if (normalized === lastSubmittedCandidateTextRef.current) {
+        return;
+      }
+
+      setDraftTranscript("");
+      void handleCandidateMessage(stableText, {
+        autoSubmitted: true,
+        source: "silence_timeout",
+      });
+    }, delayMs);
+  }
+
+  function scheduleFinalTranscriptSubmit(text: string) {
+    clearPendingFinalTranscript();
+
+    const delayMs = getFinalChunkCommitDelayMs({
+      text,
+      interruptedRecently: interruptedRecently(),
+    });
+
+    if (delayMs === null) {
+      setDraftTranscript("");
+      setRoomNotice("Short interruption captured. Keep going when you're ready.");
+      return;
+    }
+
+    finalTranscriptTimeoutRef.current = setTimeout(() => {
+      setDraftTranscript("");
+      void handleCandidateMessage(text, {
+        source: "speech_final",
+      });
+    }, delayMs);
   }
 
   async function postTranscript(speaker: "USER" | "AI", text: string) {
@@ -223,34 +348,123 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
   }
 
   async function requestAssistantTurn() {
+    await interruptAiTurn();
     setIsAssistantThinking(true);
+    setAssistantDraft("");
 
     try {
-      const response = await fetch(`/api/sessions/${props.sessionId}/assistant-turn`, {
+      const abortController = new AbortController();
+      assistantStreamAbortRef.current = abortController;
+
+      const response = await fetch(`/api/sessions/${props.sessionId}/assistant-turn/stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: abortController.signal,
       });
 
-      const payload = await response.json();
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.message ?? "Unable to generate assistant reply.");
+      if (!response.ok || !response.body) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.message ?? "Unable to generate assistant reply.");
       }
 
-      if (payload.data.transcript) {
-        setTranscripts((current) => [...current, payload.data.transcript]);
-      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulated = "";
+      let spokenIndex = 0;
 
-      if (payload.data.events?.length) {
-        setEvents((current) => [...payload.data.events, ...current]);
-      }
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          break;
+        }
 
-      await voiceAdapterRef.current?.speakText(payload.data.transcript.text);
+        buffer += decoder.decode(value, { stream: true });
+        const eventsPayload = buffer.split("\n\n");
+        buffer = eventsPayload.pop() ?? "";
+
+        for (const rawEvent of eventsPayload) {
+          const parsed = parseSseEvent(rawEvent);
+          if (!parsed) {
+            continue;
+          }
+
+          if (parsed.event === "delta") {
+            const text = typeof parsed.data?.text === "string" ? parsed.data.text : "";
+            accumulated += text;
+            setAssistantDraft(accumulated);
+
+            const readyToSpeak = extractSpeakableText(accumulated, spokenIndex);
+            if (readyToSpeak.text) {
+              spokenIndex = readyToSpeak.nextIndex;
+              await voiceAdapterRef.current?.speakText(readyToSpeak.text);
+            }
+          }
+
+          if (parsed.event === "error") {
+            const message =
+              typeof parsed.data?.message === "string"
+                ? parsed.data.message
+                : "Unable to generate assistant reply.";
+            throw new Error(message);
+          }
+
+          if (parsed.event === "done") {
+            const payload = parsed.data as {
+              transcript?: TranscriptSegment;
+              events?: SessionEvent[];
+            };
+            setAssistantDraft("");
+
+            const finalTranscript = payload.transcript;
+            if (finalTranscript) {
+              setTranscripts((current) => [...current, finalTranscript]);
+            }
+
+            const finalEvents = payload.events;
+            if (Array.isArray(finalEvents) && finalEvents.length > 0) {
+              setEvents((current) => [...finalEvents, ...current]);
+            }
+
+            if (accumulated.length > spokenIndex) {
+              await voiceAdapterRef.current?.speakText(accumulated.slice(spokenIndex).trim());
+            }
+          }
+        }
+      }
     } finally {
+      assistantStreamAbortRef.current = null;
       setIsAssistantThinking(false);
     }
   }
 
-  async function handleCandidateMessage(text: string) {
+  async function handleCandidateMessage(
+    text: string,
+    options?: { autoSubmitted?: boolean; source?: string },
+  ) {
+    const normalized = normalizeCandidateText(text);
+    if (!normalized) {
+      return;
+    }
+
+    const speechDrivenSource =
+      options?.source === "speech_final" ||
+      options?.source === "silence_timeout" ||
+      Boolean(options?.autoSubmitted);
+
+    if (speechDrivenSource && shouldIgnoreInterruptedUtterance(normalized, interruptedRecently())) {
+      setRoomNotice("Taking a short pause. The room is still listening for the rest of your answer.");
+      return;
+    }
+
+    lastSubmittedCandidateTextRef.current = normalized;
+    if (options?.autoSubmitted) {
+      setRoomNotice("Candidate turn auto-submitted after a short pause.");
+      await postEvent(SESSION_EVENT_TYPES.CANDIDATE_TURN_AUTOSUBMITTED, {
+        source: options.source ?? "silence_timeout",
+        textPreview: normalized.slice(0, 120),
+      });
+    }
     await postTranscript("USER", text);
     await requestAssistantTurn();
   }
@@ -314,11 +528,63 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
     }
 
     setLastVoiceError(null);
-    await voiceAdapterRef.current.startListening();
+    clearPendingFinalTranscript();
+    setRoomNotice("Continuous listening is on. The room will auto-submit a candidate turn after a short pause.");
+    setIsContinuousListening(true);
+    await postEvent(SESSION_EVENT_TYPES.LISTENING_STARTED, {
+      mode: "continuous",
+    });
+    await voiceAdapterRef.current.startListening({ continuousMode: true });
   }
 
-  function stopListening() {
+  async function startPushToTalk() {
+    if (!voiceAdapterRef.current) {
+      setLastVoiceError("Voice adapter is not ready.");
+      return;
+    }
+
+    setLastVoiceError(null);
+    clearPendingFinalTranscript();
+    setRoomNotice("Push-to-talk is active while you hold the button.");
+    await voiceAdapterRef.current.startListening({ continuousMode: false });
+  }
+
+  async function stopListening() {
+    clearSilenceTimer();
+    clearPendingFinalTranscript();
+    if (isContinuousListening) {
+      setRoomNotice("Continuous listening stopped.");
+      setIsContinuousListening(false);
+      await postEvent(SESSION_EVENT_TYPES.LISTENING_STOPPED, {
+        mode: "continuous",
+      });
+    }
     voiceAdapterRef.current?.stopListening();
+  }
+
+  async function interruptAiTurn(reason: "candidate_speech" | "manual" = "manual") {
+    const wasStreaming = Boolean(assistantStreamAbortRef.current) || Boolean(assistantDraft);
+    const wasSpeaking = voiceState === "speaking";
+
+    assistantStreamAbortRef.current?.abort();
+    assistantStreamAbortRef.current = null;
+    voiceAdapterRef.current?.cancelSpeaking();
+    setAssistantDraft("");
+    setIsAssistantThinking(false);
+
+    if (reason === "candidate_speech" && (wasStreaming || wasSpeaking)) {
+      interruptionCooldownUntilRef.current = Date.now() + 2500;
+      setLastInterruptionAt(new Date().toISOString());
+      setRoomNotice("AI response interrupted because the candidate started speaking.");
+      clearInterruptionNoticeTimer();
+      interruptionNoticeTimeoutRef.current = setTimeout(() => {
+        setLastInterruptionAt(null);
+      }, 4000);
+      await postEvent(SESSION_EVENT_TYPES.AI_INTERRUPTED_BY_CANDIDATE, {
+        hadLiveDraft: wasStreaming,
+        wasSpeaking,
+      });
+    }
   }
 
   async function speakAiPrompt(text: string) {
@@ -348,8 +614,28 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
             <div>Language: {editorLanguageLabel(props.selectedLanguage)}</div>
             <div>Level: {props.targetLevel ?? "Unspecified"}</div>
             <div>Persona: {props.personaEnabled ? "Enabled" : "Generic"}</div>
+            <div>Stage: {describeCodingStage(currentStage)}</div>
           </div>
         </header>
+
+        <section
+          style={{
+            ...cardStyle,
+            padding: 16,
+            display: "grid",
+            gap: 10,
+          }}
+        >
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <StatusPill label={describeVoiceState(voiceState)} tone={voiceTone(voiceState)} />
+            <StatusPill label={`Stage: ${describeCodingStage(currentStage)}`} tone="neutral" />
+            {isContinuousListening ? <StatusPill label="Continuous Listening On" tone="success" /> : null}
+            {isAssistantThinking ? <StatusPill label="AI Generating" tone="info" /> : null}
+            {assistantDraft ? <StatusPill label="AI Streaming" tone="info" /> : null}
+            {lastInterruptionAt ? <StatusPill label="AI Interrupted" tone="warning" /> : null}
+          </div>
+          <span style={{ color: "var(--muted)", fontSize: 14 }}>{roomNotice}</span>
+        </section>
 
         <section style={{ display: "grid", gap: 18, gridTemplateColumns: "340px 1fr 360px" }}>
           <aside
@@ -370,6 +656,9 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
               <h2 style={{ marginTop: 0 }}>Interviewer Context</h2>
               <p style={{ color: "var(--muted)" }}>
                 {props.personaSummary ?? "Generic interviewer persona for now."}
+              </p>
+              <p style={{ margin: "10px 0 0", color: "var(--text)", fontWeight: 600 }}>
+                Current stage: {describeCodingStage(currentStage)}
               </p>
               {props.appliedPromptContext ? (
                 <p style={{ marginBottom: 0, fontSize: 14, color: "var(--muted)" }}>
@@ -415,19 +704,19 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
                   <button
                     style={actionButtonStyle}
                     disabled={!voiceAvailability.speechRecognition || isPending}
-                    onClick={stopListening}
+                    onClick={() => runAction(stopListening)}
                     onMouseDown={() => {
-                      void startListening();
+                      void startPushToTalk();
                     }}
-                    onMouseUp={stopListening}
-                    onMouseLeave={stopListening}
+                    onMouseUp={() => void stopListening()}
+                    onMouseLeave={() => void stopListening()}
                   >
                     Push to Talk
                   </button>
                   <button
                     style={actionButtonStyle}
                     disabled={!voiceAvailability.speechRecognition || isPending}
-                    onClick={stopListening}
+                    onClick={() => runAction(stopListening)}
                   >
                     Stop Mic
                   </button>
@@ -481,7 +770,15 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
               <button
                 style={actionButtonStyle}
                 disabled={isPending}
-                onClick={() => runAction(async () => postEvent(SESSION_EVENT_TYPES.STAGE_ADVANCED, { stage: "APPROACH_DISCUSSION" }))}
+                onClick={() =>
+                  runAction(async () =>
+                    postEvent(SESSION_EVENT_TYPES.STAGE_ADVANCED, {
+                      previousStage: currentStage,
+                      stage: "APPROACH_DISCUSSION",
+                      source: "room-controls",
+                    }),
+                  )
+                }
               >
                 Advance Stage
               </button>
@@ -640,6 +937,12 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
                     <span>{draftTranscript}</span>
                   </div>
                 ) : null}
+                {assistantDraft ? (
+                  <div style={{ ...transcriptBubble("AI"), opacity: 0.75 }}>
+                    <strong>AI (live)</strong>
+                    <span>{assistantDraft}</span>
+                  </div>
+                ) : null}
               </div>
             </section>
 
@@ -652,6 +955,11 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
                   timeline.map((event) => (
                     <div key={event.id} style={timelineItemStyle}>
                       <strong>{event.eventType}</strong>
+                      {event.eventType === SESSION_EVENT_TYPES.STAGE_ADVANCED ? (
+                        <span style={{ color: "var(--text)", fontSize: 14 }}>
+                          {formatStageTransition(event.payloadJson)}
+                        </span>
+                      ) : null}
                       <span style={{ color: "var(--muted)", fontSize: 14 }}>
                         {new Date(event.eventTime).toLocaleTimeString()}
                       </span>
@@ -747,4 +1055,106 @@ function transcriptBubble(speaker: TranscriptSegment["speaker"]) {
           ? "#fff"
           : "rgba(0,0,0,0.04)",
   } as const;
+}
+
+function StatusPill({ label, tone }: { label: string; tone: "neutral" | "success" | "warning" | "info" | "danger" }) {
+  const palette = {
+    neutral: { background: "#fff", color: "var(--text)" },
+    success: { background: "rgba(13, 122, 82, 0.10)", color: "var(--success)" },
+    warning: { background: "rgba(184, 110, 0, 0.12)", color: "#8a5a00" },
+    info: { background: "rgba(24, 90, 219, 0.08)", color: "var(--accent-strong)" },
+    danger: { background: "rgba(176, 58, 46, 0.10)", color: "var(--danger)" },
+  } as const;
+
+  return (
+    <span
+      style={{
+        padding: "6px 10px",
+        borderRadius: 999,
+        border: "1px solid var(--border)",
+        fontSize: 13,
+        fontWeight: 700,
+        ...palette[tone],
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function parseSseEvent(raw: string) {
+  const lines = raw.split("\n");
+  let event = "message";
+  const dataLines: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith("event:")) {
+      event = line.slice(6).trim();
+    }
+
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice(5).trim());
+    }
+  }
+
+  if (dataLines.length === 0) {
+    return null;
+  }
+
+  try {
+    return {
+      event,
+      data: JSON.parse(dataLines.join("\n")) as Record<string, unknown>,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function extractSpeakableText(text: string, fromIndex: number) {
+  const pending = text.slice(fromIndex);
+  const matches = pending.match(/.*?[.!?](?:\s|$)/g);
+
+  if (!matches || matches.length === 0) {
+    return {
+      text: "",
+      nextIndex: fromIndex,
+    };
+  }
+
+  const speakable = matches.join("").trim();
+  return {
+    text: speakable,
+    nextIndex: fromIndex + speakable.length,
+  };
+}
+
+function normalizeCandidateText(text: string) {
+  return text.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function formatStageTransition(payloadJson: unknown) {
+  const payload =
+    typeof payloadJson === "object" && payloadJson !== null ? (payloadJson as Record<string, unknown>) : {};
+  const previousStage = isCodingInterviewStage(payload.previousStage)
+    ? describeCodingStage(payload.previousStage)
+    : null;
+  const stage = isCodingInterviewStage(payload.stage) ? describeCodingStage(payload.stage) : null;
+
+  if (previousStage && stage) {
+    return `${previousStage} -> ${stage}`;
+  }
+
+  if (stage) {
+    return `Moved to ${stage}`;
+  }
+
+  return "Stage transition recorded.";
+}
+
+function voiceTone(state: BrowserVoiceState): "neutral" | "success" | "warning" | "info" | "danger" {
+  if (state === "listening") return "success";
+  if (state === "starting" || state === "processing" || state === "speaking") return "info";
+  if (state === "error") return "danger";
+  return "neutral";
 }

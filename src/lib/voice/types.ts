@@ -12,6 +12,7 @@ export type VoiceAdapterEventHandlers = {
   onTranscript?: (chunk: VoiceTranscriptChunk) => void;
   onStateChange?: (state: BrowserVoiceState) => void;
   onError?: (message: string) => void;
+  onSpeechStart?: () => void;
 };
 
 export type BrowserVoiceState =
@@ -24,7 +25,7 @@ export type BrowserVoiceState =
 
 export interface InterviewVoiceAdapter {
   getAvailability(): VoiceAvailability;
-  startListening(): Promise<void>;
+  startListening(options?: { continuousMode?: boolean }): Promise<void>;
   stopListening(): void;
   speakText(text: string): Promise<void>;
   cancelSpeaking(): void;

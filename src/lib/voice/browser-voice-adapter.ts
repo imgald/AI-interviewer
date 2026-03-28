@@ -56,6 +56,9 @@ export class BrowserVoiceAdapter implements InterviewVoiceAdapter {
   private state: BrowserVoiceState = "idle";
   private speechQueue: Promise<void> = Promise.resolve();
   private isDisposed = false;
+  private shouldResumeListening = false;
+  private utteranceSpeechDetected = false;
+  private speechGeneration = 0;
 
   constructor(handlers: VoiceAdapterEventHandlers) {
     this.handlers = handlers;
@@ -76,7 +79,7 @@ export class BrowserVoiceAdapter implements InterviewVoiceAdapter {
     };
   }
 
-  async startListening() {
+  async startListening(options?: { continuousMode?: boolean }) {
     if (!this.recognition) {
       this.handlers.onError?.("Speech recognition is not available in this browser.");
       emitState(this.handlers, "error");
@@ -84,6 +87,7 @@ export class BrowserVoiceAdapter implements InterviewVoiceAdapter {
     }
 
     try {
+      this.shouldResumeListening = options?.continuousMode ?? true;
       this.setState("starting");
       this.recognition.start();
     } catch (error) {
@@ -95,6 +99,7 @@ export class BrowserVoiceAdapter implements InterviewVoiceAdapter {
   }
 
   stopListening() {
+    this.shouldResumeListening = false;
     this.recognition?.stop();
     if (this.state !== "speaking") {
       this.setState("idle");
@@ -106,8 +111,9 @@ export class BrowserVoiceAdapter implements InterviewVoiceAdapter {
       return;
     }
 
+    const generation = ++this.speechGeneration;
     const speakTask = async () => {
-      if (this.isDisposed) {
+      if (this.isDisposed || generation !== this.speechGeneration) {
         return;
       }
 
@@ -116,14 +122,14 @@ export class BrowserVoiceAdapter implements InterviewVoiceAdapter {
       await new Promise<void>((resolve) => {
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.onend = () => {
-          if (!this.isDisposed) {
+          if (!this.isDisposed && generation === this.speechGeneration) {
             this.setState("idle");
           }
           resolve();
         };
         utterance.onerror = () => {
           this.handlers.onError?.("Speech synthesis failed.");
-          if (!this.isDisposed) {
+          if (!this.isDisposed && generation === this.speechGeneration) {
             this.setState("error");
           }
           resolve();
@@ -137,6 +143,8 @@ export class BrowserVoiceAdapter implements InterviewVoiceAdapter {
   }
 
   cancelSpeaking() {
+    this.speechGeneration += 1;
+    this.speechQueue = Promise.resolve();
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -171,6 +179,7 @@ export class BrowserVoiceAdapter implements InterviewVoiceAdapter {
     recognition.lang = "en-US";
 
     recognition.onstart = () => {
+      this.utteranceSpeechDetected = false;
       this.setState("listening");
     };
 
@@ -180,6 +189,11 @@ export class BrowserVoiceAdapter implements InterviewVoiceAdapter {
         const transcript = result[0]?.transcript?.trim();
         if (!transcript) {
           continue;
+        }
+
+        if (!this.utteranceSpeechDetected) {
+          this.utteranceSpeechDetected = true;
+          this.handlers.onSpeechStart?.();
         }
 
         this.handlers.onTranscript?.({
@@ -195,8 +209,24 @@ export class BrowserVoiceAdapter implements InterviewVoiceAdapter {
     };
 
     recognition.onend = () => {
+      this.utteranceSpeechDetected = false;
       if (this.state !== "speaking" && this.state !== "error") {
         this.setState("idle");
+      }
+
+      if (this.shouldResumeListening && !this.isDisposed) {
+        queueMicrotask(() => {
+          if (!this.shouldResumeListening || this.isDisposed || !this.recognition) {
+            return;
+          }
+
+          try {
+            this.setState("starting");
+            this.recognition.start();
+          } catch {
+            // Browser recognition can throw if restarted too quickly; the next user action can recover.
+          }
+        });
       }
     };
 

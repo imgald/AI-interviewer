@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { describeCodingStage, isCodingInterviewStage } from "@/lib/assistant/stages";
 import { getPersonaJobSnapshot, type PersonaJobSnapshot } from "@/lib/persona/queue";
 
 export type OpsFeedScope = "all" | "persona" | "session";
@@ -180,11 +181,90 @@ function buildPersonaEventDescription(eventType: string, payloadJson: unknown) {
   return "Persona pipeline event recorded.";
 }
 
-function buildSessionEventDescription(eventType: string, payloadJson: unknown) {
+export function buildSessionEventDescription(eventType: string, payloadJson: unknown) {
   const payload = asRecord(payloadJson);
 
   if (eventType === "SESSION_CREATED") {
     return `Session created for ${stringOrFallback(payload.mode, "unknown mode")} interview.`;
+  }
+
+  if (eventType === "QUESTION_ASSIGNED") {
+    return `Question assigned: ${stringOrFallback(payload.questionTitle, "untitled question")}.`;
+  }
+
+  if (eventType === "INTERVIEW_READY") {
+    return "Interview room is prepared and ready to begin.";
+  }
+
+  if (eventType === "INTERVIEW_ROOM_OPENED") {
+    return `Candidate opened the interview room (${stringOrFallback(payload.room, "default room")}).`;
+  }
+
+  if (eventType === "LISTENING_STARTED") {
+    return `Continuous listening started in ${stringOrFallback(payload.mode, "unknown")} mode.`;
+  }
+
+  if (eventType === "LISTENING_STOPPED") {
+    return `Continuous listening stopped for ${stringOrFallback(payload.mode, "unknown")} mode.`;
+  }
+
+  if (eventType === "QUESTION_SHOWN") {
+    return "Interview question was surfaced in the room.";
+  }
+
+  if (eventType === "STAGE_ADVANCED") {
+    const previousStage = describeStage(payload.previousStage);
+    const stage = describeStage(payload.stage);
+
+    if (previousStage && stage) {
+      return `Interview advanced from ${previousStage} to ${stage}.`;
+    }
+
+    if (stage) {
+      return `Interview stage set to ${stage}.`;
+    }
+
+    return "Interview stage advanced.";
+  }
+
+  if (eventType === "CANDIDATE_SPOKE") {
+    return "Candidate turn was recorded.";
+  }
+
+  if (eventType === "CANDIDATE_TURN_AUTOSUBMITTED") {
+    return `Candidate turn auto-submitted after silence (${stringOrFallback(payload.source, "unknown source")}).`;
+  }
+
+  if (eventType === "AI_SPOKE") {
+    return `AI interviewer delivered a reply using ${stringOrFallback(payload.source, "unknown provider")}.`;
+  }
+
+  if (eventType === "AI_INTERRUPTED_BY_CANDIDATE") {
+    return "AI response was interrupted because the candidate started speaking.";
+  }
+
+  if (eventType === "HINT_REQUESTED") {
+    return `Candidate requested a hint (${stringOrFallback(payload.source, "unknown source")}).`;
+  }
+
+  if (eventType === "CODE_SNAPSHOT_SAVED") {
+    return `Code snapshot saved in ${stringOrFallback(payload.language, "unknown language")}.`;
+  }
+
+  if (eventType === "CODE_RUN_REQUESTED") {
+    return `Code execution requested for ${stringOrFallback(payload.language, "unknown language")}.`;
+  }
+
+  if (eventType === "CODE_RUN_COMPLETED") {
+    return `Code execution completed with status ${stringOrFallback(payload.status, "unknown")}.`;
+  }
+
+  if (eventType === "INTERVIEW_ENDED") {
+    return "Interview session ended.";
+  }
+
+  if (eventType === "EVALUATION_STARTED") {
+    return "Post-interview evaluation started.";
   }
 
   return "Session lifecycle event recorded.";
@@ -204,4 +284,12 @@ function stringOrFallback(value: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function describeStage(value: unknown) {
+  if (!isCodingInterviewStage(value)) {
+    return null;
+  }
+
+  return describeCodingStage(value);
 }

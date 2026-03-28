@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { fail, ok } from "@/lib/http";
 import { generateAssistantTurn } from "@/lib/assistant/generate-turn";
+import { deriveCurrentCodingStage } from "@/lib/assistant/stages";
 import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
 
 type RouteContext = {
@@ -23,12 +24,21 @@ export async function POST(_: Request, { params }: RouteContext) {
         orderBy: { createdAt: "desc" },
         take: 1,
       },
+      events: {
+        orderBy: { eventTime: "asc" },
+      },
     },
   });
 
   if (!session) {
     return fail("Interview session not found", 404);
   }
+
+  const currentStage = deriveCurrentCodingStage({
+    events: session.events,
+    transcripts: session.transcripts,
+    latestExecutionRun: session.executionRuns[0] ?? null,
+  });
 
   const turn = await generateAssistantTurn({
     mode: session.mode,
@@ -38,6 +48,7 @@ export async function POST(_: Request, { params }: RouteContext) {
     selectedLanguage: session.selectedLanguage,
     personaSummary: session.interviewerProfile?.personaSummary ?? null,
     appliedPromptContext: session.interviewerContext?.appliedPromptContext ?? null,
+    currentStage,
     recentTranscripts: session.transcripts.map((segment) => ({
       speaker: segment.speaker,
       text: segment.text,
@@ -78,12 +89,13 @@ export async function POST(_: Request, { params }: RouteContext) {
   });
   events.push(aiSpokeEvent);
 
-  if (turn.suggestedStage) {
+  if (turn.suggestedStage && turn.suggestedStage !== currentStage) {
     const stageEvent = await prisma.sessionEvent.create({
       data: {
         sessionId: id,
         eventType: SESSION_EVENT_TYPES.STAGE_ADVANCED,
         payloadJson: {
+          previousStage: currentStage,
           stage: turn.suggestedStage,
           source: turn.source,
         },
@@ -97,6 +109,7 @@ export async function POST(_: Request, { params }: RouteContext) {
     events,
     meta: {
       source: turn.source,
+      currentStage,
       suggestedStage: turn.suggestedStage ?? null,
     },
   });

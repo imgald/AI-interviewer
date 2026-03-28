@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { InterviewRoomClient } from "@/components/interview/interview-room-client";
+import { deriveCurrentCodingStage } from "@/lib/assistant/stages";
 import { prisma } from "@/lib/db";
 import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
 
@@ -20,8 +21,12 @@ export default async function InterviewRoomPage({ params }: InterviewRoomPagePro
         orderBy: { segmentIndex: "asc" },
       },
       events: {
-        orderBy: { eventTime: "desc" },
+        orderBy: { eventTime: "asc" },
         take: 25,
+      },
+      executionRuns: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
       },
     },
   });
@@ -52,6 +57,12 @@ export default async function InterviewRoomPage({ params }: InterviewRoomPagePro
     });
   }
 
+  const initialStage = deriveCurrentCodingStage({
+    events: session.events,
+    transcripts: session.transcripts,
+    latestExecutionRun: session.executionRuns[0] ?? null,
+  });
+
   return (
     <InterviewRoomClient
       sessionId={session.id}
@@ -63,6 +74,7 @@ export default async function InterviewRoomPage({ params }: InterviewRoomPagePro
       personaEnabled={session.personaEnabled}
       personaSummary={session.interviewerProfile?.personaSummary ?? null}
       appliedPromptContext={session.interviewerContext?.appliedPromptContext ?? null}
+      initialStage={initialStage}
       initialTranscripts={session.transcripts.map((segment) => ({
         id: segment.id,
         speaker: segment.speaker,

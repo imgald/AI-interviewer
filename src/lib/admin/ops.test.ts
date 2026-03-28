@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildUnifiedOpsFeed, type AdminProfileDetail } from "@/lib/admin/ops";
+import { buildSessionEventDescription, buildUnifiedOpsFeed, type AdminProfileDetail } from "@/lib/admin/ops";
 
 describe("buildUnifiedOpsFeed", () => {
   const detail: AdminProfileDetail = {
@@ -60,5 +60,23 @@ describe("buildUnifiedOpsFeed", () => {
     const result = buildUnifiedOpsFeed(detail, "session");
     expect(result).toHaveLength(1);
     expect(result[0]?.source).toBe("session");
+  });
+
+  it("describes stage transitions in a human-readable way", () => {
+    const description = buildSessionEventDescription("STAGE_ADVANCED", {
+      previousStage: "APPROACH_DISCUSSION",
+      stage: "IMPLEMENTATION",
+    });
+
+    expect(description).toMatch(/Approach Discussion/);
+    expect(description).toMatch(/Implementation/);
+  });
+
+  it("describes AI interruptions from new realtime events", () => {
+    const description = buildSessionEventDescription("AI_INTERRUPTED_BY_CANDIDATE", {
+      wasSpeaking: true,
+    });
+
+    expect(description).toMatch(/interrupted/i);
   });
 });

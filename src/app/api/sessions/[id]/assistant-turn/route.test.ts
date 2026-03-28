@@ -46,12 +46,13 @@ describe("assistant turn route", () => {
       interviewerProfile: {
         personaSummary: "Backend oriented interviewer.",
       },
-      transcripts: [{ segmentIndex: 0, speaker: "USER", text: "I would sort first." }],
+      transcripts: [{ segmentIndex: 0, speaker: "USER", text: "I would first clarify the constraints and expected output." }],
       executionRuns: [],
+      events: [],
     });
     generateAssistantTurn.mockResolvedValue({
       reply: "Walk me through a concrete example and then tell me the complexity.",
-      suggestedStage: "APPROACH_DISCUSSION",
+      suggestedStage: "IMPLEMENTATION",
       source: "fallback",
     });
     prisma.transcriptSegment.create.mockResolvedValue({
@@ -82,5 +83,16 @@ describe("assistant turn route", () => {
       },
     });
     expect(prisma.sessionEvent.create).toHaveBeenCalledTimes(2);
+    expect(prisma.sessionEvent.create).toHaveBeenLastCalledWith({
+      data: {
+        sessionId: "session-1",
+        eventType: "STAGE_ADVANCED",
+        payloadJson: {
+          previousStage: "APPROACH_DISCUSSION",
+          stage: "IMPLEMENTATION",
+          source: "fallback",
+        },
+      },
+    });
   });
 });

@@ -56,7 +56,7 @@ describe("generateAssistantTurn", () => {
     });
 
     expect(result.source).toBe("fallback");
-    expect(result.reply).toMatch(/concrete example/i);
+    expect(result.reply).toMatch(/example|starting point/i);
   });
 
   it("asks for more specificity when the candidate reply is too short", async () => {
@@ -68,7 +68,7 @@ describe("generateAssistantTurn", () => {
     });
 
     expect(result.source).toBe("fallback");
-    expect(result.reply).toMatch(/concrete|example|exactly/i);
+    expect(result.reply).toMatch(/constraint|output|assumption|example/i);
   });
 
   it("varies the wording if the previous AI turn was the same follow-up", async () => {
@@ -103,5 +103,18 @@ describe("generateAssistantTurn", () => {
     });
 
     expect(/[.!?]["']?$/.test(result.reply)).toBe(true);
+  });
+
+  it("respects the current stage when implementation is already underway", async () => {
+    const result = await generateAssistantTurn({
+      mode: "CODING",
+      questionTitle: "Top K Frequent Elements",
+      questionPrompt: "Return the k most frequent elements.",
+      currentStage: "IMPLEMENTATION",
+      recentTranscripts: [{ speaker: "USER", text: "I would use a hash map and then fill the result array." }],
+    });
+
+    expect(result.reply).toMatch(/implement|code|branch|pointer|loop/i);
+    expect(result.suggestedStage).toBe("IMPLEMENTATION");
   });
 });
