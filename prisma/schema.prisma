@@ -1,0 +1,426 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum InterviewMode {
+  CODING
+  SYSTEM_DESIGN
+}
+
+enum SessionStatus {
+  CREATED
+  PREPARING
+  READY
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+  FAILED
+}
+
+enum QuestionType {
+  CODING
+  SYSTEM_DESIGN
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum CompanyStyle {
+  GENERIC
+  AMAZON
+  META
+  GOOGLE
+  STRIPE
+}
+
+enum TargetLevel {
+  NEW_GRAD
+  SDE1
+  SDE2
+  SENIOR
+  STAFF
+}
+
+enum Speaker {
+  USER
+  AI
+  SYSTEM
+}
+
+enum ExecutionStatus {
+  PASSED
+  FAILED
+  ERROR
+  TIMEOUT
+}
+
+enum Recommendation {
+  STRONG_HIRE
+  HIRE
+  BORDERLINE
+  NO_HIRE
+}
+
+enum SourceType {
+  LINKEDIN
+  PERSONAL_SITE
+  GITHUB
+  SCHOLAR
+  COMPANY_BIO
+  BLOG
+  OTHER
+}
+
+enum FetchStatus {
+  PENDING
+  FETCHING
+  SUCCEEDED
+  FAILED
+  UNSUPPORTED
+  BLOCKED
+}
+
+enum PersonaStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+  PARTIAL
+}
+
+model User {
+  id        String             @id @default(cuid())
+  email     String             @unique
+  name      String?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  profile   UserProfile?
+  sessions  InterviewSession[]
+}
+
+model UserProfile {
+  id                String      @id @default(cuid())
+  userId            String      @unique
+  targetRole        String?
+  targetLevel       TargetLevel?
+  preferredLanguage String?
+  interviewFocus    String?
+  targetCompanies   Json?
+  notes             String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  user              User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Question {
+  id                 String                @id @default(cuid())
+  type               QuestionType
+  title              String
+  slug               String                @unique
+  prompt             String
+  difficulty         Difficulty
+  companyStyle       CompanyStyle?
+  levelTarget        TargetLevel?
+  topicTags          Json?
+  estimatedMinutes   Int?
+  isActive           Boolean               @default(true)
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  hints              QuestionHint[]
+  followups          QuestionFollowup[]
+  rubrics            QuestionRubric[]
+  referenceSolutions ReferenceSolution[]
+  sessions           InterviewSession[]
+}
+
+model QuestionHint {
+  id         String   @id @default(cuid())
+  questionId String
+  hintLevel  Int
+  content    String
+  createdAt  DateTime @default(now())
+
+  question   Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId, hintLevel])
+}
+
+model QuestionFollowup {
+  id               String   @id @default(cuid())
+  questionId       String
+  phase            String
+  content          String
+  triggerCondition String?
+  createdAt        DateTime @default(now())
+
+  question         Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId, phase])
+}
+
+model QuestionRubric {
+  id             String   @id @default(cuid())
+  questionId     String
+  dimensionKey   String
+  dimensionLabel String
+  description    String
+  maxScore       Int
+  weight         Float
+  createdAt      DateTime @default(now())
+
+  question       Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+}
+
+model ReferenceSolution {
+  id              String   @id @default(cuid())
+  questionId      String
+  language        String?
+  content         String
+  solutionNotes   String?
+  complexityTime  String?
+  complexitySpace String?
+  createdAt       DateTime @default(now())
+
+  question        Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+}
+
+model InterviewerProfile {
+  id                      String                     @id @default(cuid())
+  sourceUrl               String
+  sourceType              SourceType
+  fullName                String?
+  headline                String?
+  currentCompany          String?
+  currentRole             String?
+  location                String?
+  bioSummary              String?
+  specialties             Json?
+  education               Json?
+  publications            Json?
+  signalsJson             Json?
+  personaSummary          String?
+  seniorityEstimate       String?
+  technicalFocus          Json?
+  likelyInterviewFocus    Json?
+  communicationStyleGuess Json?
+  confidence              Float?
+  status                  PersonaStatus              @default(PENDING)
+  fetchStatus             FetchStatus                @default(PENDING)
+  fetchedAt               DateTime?
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+
+  sources                 InterviewerProfileSource[]
+  sessions                InterviewSession[]
+  sessionContexts         SessionInterviewerContext[]
+  jobEvents               PersonaJobEvent[]
+
+  @@index([status])
+  @@index([sourceType])
+  @@index([sourceUrl])
+}
+
+model PersonaJobEvent {
+  id                   String              @id @default(cuid())
+  interviewerProfileId String
+  eventType            String
+  payloadJson          Json?
+  createdAt            DateTime            @default(now())
+
+  interviewerProfile   InterviewerProfile  @relation(fields: [interviewerProfileId], references: [id], onDelete: Cascade)
+
+  @@index([interviewerProfileId, createdAt])
+  @@index([eventType, createdAt])
+}
+
+model InterviewerProfileSource {
+  id                   String              @id @default(cuid())
+  interviewerProfileId String
+  url                  String
+  sourceType           SourceType
+  rawTextExcerpt       String?
+  normalizedContent    String?
+  fetchStatus          FetchStatus         @default(PENDING)
+  errorMessage         String?
+  fetchedAt            DateTime?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  interviewerProfile   InterviewerProfile  @relation(fields: [interviewerProfileId], references: [id], onDelete: Cascade)
+
+  @@index([interviewerProfileId])
+  @@index([fetchStatus])
+}
+
+model InterviewSession {
+  id                  String                     @id @default(cuid())
+  userId              String
+  questionId          String?
+  mode                InterviewMode
+  status              SessionStatus
+  selectedLanguage    String?
+  companyStyle        CompanyStyle?
+  targetLevel         TargetLevel?
+  voiceEnabled        Boolean                    @default(true)
+  finalRecommendation Recommendation?
+  interviewerProfileUrl String?
+  interviewerProfileId String?
+  personaEnabled      Boolean                    @default(false)
+  personaStatus       PersonaStatus?
+  startedAt           DateTime?
+  endedAt             DateTime?
+  durationSeconds     Int?
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  user                User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  question            Question?                  @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  interviewerProfile  InterviewerProfile?        @relation(fields: [interviewerProfileId], references: [id], onDelete: SetNull)
+
+  events              SessionEvent[]
+  transcripts         TranscriptSegment[]
+  codeSnapshots       CodeSnapshot[]
+  executionRuns       ExecutionRun[]
+  evaluation          Evaluation?
+  feedbackReport      FeedbackReport?
+  interviewerContext  SessionInterviewerContext?
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@index([interviewerProfileId])
+}
+
+model SessionInterviewerContext {
+  id                   String               @id @default(cuid())
+  sessionId            String               @unique
+  interviewerProfileId String
+  personaSnapshotJson  Json
+  appliedPromptContext String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  session              InterviewSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  interviewerProfile   InterviewerProfile   @relation(fields: [interviewerProfileId], references: [id], onDelete: Cascade)
+
+  @@index([interviewerProfileId])
+}
+
+model SessionEvent {
+  id         String           @id @default(cuid())
+  sessionId  String
+  eventType  String
+  eventTime  DateTime         @default(now())
+  payloadJson Json?
+
+  session    InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, eventTime])
+}
+
+model TranscriptSegment {
+  id           String           @id @default(cuid())
+  sessionId    String
+  speaker      Speaker
+  segmentIndex Int
+  text         String
+  startedAtMs  Int?
+  endedAtMs    Int?
+  isFinal      Boolean          @default(true)
+  audioUrl     String?
+  createdAt    DateTime         @default(now())
+
+  session      InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, segmentIndex])
+}
+
+model CodeSnapshot {
+  id            String           @id @default(cuid())
+  sessionId     String
+  language      String
+  content       String
+  snapshotIndex Int
+  source        String
+  createdAt     DateTime         @default(now())
+
+  session       InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  executionRuns ExecutionRun[]
+
+  @@index([sessionId, snapshotIndex])
+}
+
+model ExecutionRun {
+  id             String           @id @default(cuid())
+  sessionId      String
+  codeSnapshotId String?
+  stdin          String?
+  testCasesJson  Json?
+  stdout         String?
+  stderr         String?
+  status         ExecutionStatus
+  runtimeMs      Int?
+  memoryKb       Int?
+  createdAt      DateTime         @default(now())
+
+  session        InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  codeSnapshot   CodeSnapshot?    @relation(fields: [codeSnapshotId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId, createdAt])
+}
+
+model Evaluation {
+  id              String                     @id @default(cuid())
+  sessionId       String                     @unique
+  overallScore    Float?
+  overallSummary  String?
+  strengths       Json?
+  weaknesses      Json?
+  missedSignals   Json?
+  improvementPlan Json?
+  recommendation  Recommendation?
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+
+  session         InterviewSession           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  dimensionScores EvaluationDimensionScore[]
+}
+
+model EvaluationDimensionScore {
+  id           String      @id @default(cuid())
+  evaluationId String
+  dimensionKey String
+  score        Float
+  maxScore     Float
+  evidence     String?
+  createdAt    DateTime    @default(now())
+
+  evaluation   Evaluation  @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+
+  @@index([evaluationId])
+}
+
+model FeedbackReport {
+  id            String           @id @default(cuid())
+  sessionId     String           @unique
+  reportVersion String
+  reportJson    Json
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  session       InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
