@@ -184,6 +184,35 @@ describe("generateAssistantTurn", () => {
     expect(result.reply).toMatch(/edge cases|boundary conditions|test next/i);
   });
 
+  it("replaces praise-only provider output with the required decision question", async () => {
+    process.env.GEMINI_API_KEY = "fake-key";
+    process.env.LLM_PROVIDER = "gemini";
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: "Great. Nice work so far." }],
+            },
+          },
+        ],
+      }),
+    } as Response) as typeof fetch;
+
+    const result = await generateAssistantTurn({
+      mode: "CODING",
+      questionTitle: "Top K Frequent Elements",
+      questionPrompt: "Return the k most frequent elements.",
+      currentStage: "TESTING_AND_COMPLEXITY",
+      recentTranscripts: [{ speaker: "USER", text: "I would test empty input, duplicates, and then talk through runtime." }],
+      latestExecutionRun: { status: "PASSED" },
+    });
+
+    expect(result.source).toBe("gemini");
+    expect(result.reply).toMatch(/time complexity|space complexity|tradeoff/i);
+  });
+
   it("falls through from gemini to openai before using local fallback", async () => {
     process.env.GEMINI_API_KEY = "fake-gemini-key";
     process.env.OPENAI_API_KEY = "fake-openai-key";
@@ -212,6 +241,57 @@ describe("generateAssistantTurn", () => {
 
     expect(result.source).toBe("openai");
     expect(result.reply).toMatch(/edge cases|test next/i);
+  });
+
+  it("keeps a non-question provider reply when the decision is to hold and listen", async () => {
+    process.env.GEMINI_API_KEY = "fake-key";
+    process.env.LLM_PROVIDER = "gemini";
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: "Keep coding and narrate the one branch you think is easiest to get wrong." }],
+            },
+          },
+        ],
+      }),
+    } as Response) as typeof fetch;
+
+    const result = await generateAssistantTurn({
+      mode: "CODING",
+      questionTitle: "Top K Frequent Elements",
+      questionPrompt: "Return the k most frequent elements.",
+      currentStage: "IMPLEMENTATION",
+      recentTranscripts: [
+        { speaker: "AI", text: "Walk me through the implementation at a high level." },
+        { speaker: "USER", text: "I am filling the map now, and next I will build the result list from the most frequent entries." },
+      ],
+      recentEvents: [
+        { eventType: "CANDIDATE_SPOKE", eventTime: "2026-03-28T00:01:00.000Z" },
+        { eventType: "AI_SPOKE", eventTime: "2026-03-28T00:01:10.000Z" },
+        { eventType: "CANDIDATE_SPOKE", eventTime: "2026-03-28T00:01:20.000Z" },
+      ],
+    });
+
+    expect(result.source).toBe("gemini");
+    expect(result.reply).toMatch(/keep coding|narrate/i);
+  });
+
+  it("uses the new fallback reply strategy for tradeoff probes", async () => {
+    const result = await generateAssistantTurn({
+      mode: "CODING",
+      questionTitle: "Top K Frequent Elements",
+      questionPrompt: "Return the k most frequent elements.",
+      currentStage: "APPROACH_DISCUSSION",
+      recentTranscripts: [
+        { speaker: "USER", text: "I could sort all frequencies after counting them in a map." },
+      ],
+    });
+
+    expect(result.source).toBe("fallback");
+    expect(result.reply).toMatch(/tradeoff|efficient alternative|runtime/i);
   });
 
   it("falls back during streaming when the configured provider yields nothing", async () => {

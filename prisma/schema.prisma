@@ -299,10 +299,38 @@ model InterviewSession {
   evaluation          Evaluation?
   feedbackReport      FeedbackReport?
   interviewerContext  SessionInterviewerContext?
+  candidateStateSnapshots CandidateStateSnapshot[]
+  interviewerDecisionSnapshots InterviewerDecisionSnapshot[]
 
   @@index([userId, createdAt])
   @@index([status])
   @@index([interviewerProfileId])
+}
+
+model CandidateStateSnapshot {
+  id          String           @id @default(cuid())
+  sessionId   String
+  stage       String?
+  source      String?
+  snapshotJson Json
+  createdAt   DateTime         @default(now())
+
+  session     InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}
+
+model InterviewerDecisionSnapshot {
+  id           String           @id @default(cuid())
+  sessionId    String
+  stage        String?
+  source       String?
+  decisionJson Json
+  createdAt    DateTime         @default(now())
+
+  session      InterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
 }
 
 model SessionInterviewerContext {

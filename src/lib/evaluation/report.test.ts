@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { generateSessionReport } from "@/lib/evaluation/report";
 
 describe("generateSessionReport", () => {
@@ -27,9 +27,13 @@ describe("generateSessionReport", () => {
               algorithmChoice: "strong",
               edgeCaseAwareness: "present",
               behavior: "structured",
+              reasoningDepth: "deep",
+              testingDiscipline: "strong",
+              complexityRigor: "strong",
               confidence: 0.82,
               evidence: ["Candidate named a hash map and a heap."],
               summary: "Understanding is clear and the candidate is progressing with a strong algorithm choice.",
+              trendSummary: "Recent state trend: progress moved from partial to progressing.",
             },
           },
         },
@@ -64,6 +68,7 @@ describe("generateSessionReport", () => {
     expect(stageReplay[0]?.decisions).toBeTruthy();
     expect(dimensions.some((dimension) => Boolean(dimension.impact))).toBe(true);
     expect(dimensions.some((dimension) => Array.isArray(dimension.improvement) && dimension.improvement.length > 0)).toBe(true);
+    expect((reportJson.candidateState as Record<string, unknown>).reasoningDepth).toBe("deep");
   });
 
   it("groups replay evidence around stage, signals, decisions, and code runs", () => {
@@ -89,6 +94,9 @@ describe("generateSessionReport", () => {
               algorithmChoice: "reasonable",
               edgeCaseAwareness: "partial",
               behavior: "structured",
+              reasoningDepth: "moderate",
+              testingDiscipline: "partial",
+              complexityRigor: "missing",
               confidence: 0.88,
               evidence: ["Candidate reached a passing run."],
               summary: "The candidate reached testing with a working implementation.",
@@ -120,3 +128,4 @@ describe("generateSessionReport", () => {
     expect(JSON.stringify(testingGroup)).toMatch(/Signal snapshot|Decision: ask_for_complexity|Code run result: PASSED/i);
   });
 });
+

@@ -90,10 +90,16 @@ This repo now has a working MVP-plus skeleton with:
 
 - Added signal_extractor as a perception layer with provider-backed structured observation first and heuristic fallback second.
 - Added decision_engine as a candidate-state-driven interviewer control layer, so turns are chosen from candidate signals plus stage and code-run evidence.
-- Gemini/OpenAI replies are now explicitly steered by the decision engine and post-processed to fall back to the required decision question when a model reply is too generic.
+- Gemini/OpenAI replies are now explicitly steered by the decision engine, shaped by a dedicated reply strategy layer, and post-processed to fall back to the required decision question when a model reply is too generic.
 - Text-provider fallback is now an explicit sequence: preferred provider -> secondary provider -> local fallback.
+- Added `reply_strategy.ts` so decision actions such as `probe_tradeoff`, `probe_correctness`, and `hold_and_listen` map to more interviewer-like wording across provider-backed and local fallback turns.
+- decision_engine v2 now distinguishes between:
+  - probing tradeoffs when the algorithm choice is weak
+  - probing correctness when implementation looks close but reasoning is still thin
+  - holding the floor and lightly steering when the candidate is progressing in a structured way
 - /admin now exposes latest session stage, latest candidate state, latest interviewer decision, and a dedicated session-state timeline.
 - /report/[id] now shares the same evidence backbone as /admin, including signal snapshots, interviewer decisions, hints, stage transitions, and code-run outcomes.
+- Candidate-state and interviewer-decision snapshots now have dedicated persistence tables in addition to the existing session-event trail, so state tracking can migrate away from event-only replay over time.
 - Added tests for signal extraction, decision logic, evidence-based reporting, provider compliance handling, and provider fallback ordering.
 
 ## What Works Today
@@ -184,10 +190,12 @@ This repo now has a working MVP-plus skeleton with:
 - `src/lib/assistant/stages.ts`: coding interview stage inference and progression helpers
 - `src/lib/assistant/signal_extractor.ts`: structured candidate-state extraction with provider-backed observation and heuristic fallback
 - `src/lib/assistant/decision_engine.ts`: candidate-state-driven interviewer decision selection
+- `src/lib/assistant/reply_strategy.ts`: action-specific interviewer wording and fallback turn shaping
 - `src/lib/assistant/policy.ts`: explicit stage policy, exit criteria, hint escalation, and prompt strategy selection
 - `src/lib/assistant/generate-turn.ts`: multi-provider assistant turn generation, provider sequencing, and decision-compliance enforcement
 - `src/lib/usage/cost.ts`: rough token/audio cost estimation and session usage summaries
 - `src/lib/evaluation/report.ts`: evidence-based report generation and session feedback scoring
+- `src/lib/session/snapshots.ts`: best-effort persistence for candidate-state and interviewer-decision snapshots
 - `src/lib/persona/queue.ts`: BullMQ queue helpers
 - `src/lib/persona/fake-ingestion.ts`: local persona ingestion simulation
 - `src/lib/persona/job-events.ts`: persona event persistence
@@ -204,6 +212,7 @@ This repo now has a working MVP-plus skeleton with:
 - Migrations:
   - `prisma/migrations/20260328000000_init`
   - `prisma/migrations/20260328010000_persona_job_events`
+  - `prisma/migrations/20260328020000_session_state_snapshots`
 
 ## Local Development
 
@@ -327,6 +336,8 @@ npm run build
 
 - Group report replay by stage and add richer per-stage evidence
 - Push LLM-backed signal extraction deeper and persist candidate-state snapshots outside the event stream
+- Move `/admin` and `/report` read paths gradually from event-derived state to snapshot-first state loading
+- Continue strengthening typed interviewer quality through richer decision actions and action-specific reply shaping
 - Replace fake persona ingestion with real public-page fetching, extraction, and summarization
 - Expand code execution from local process execution to a stronger sandbox model
 - Evolve report generation from v0 into a more rubric-driven evaluation pipeline

@@ -3,6 +3,7 @@ import { fail, ok } from "@/lib/http";
 import { generateAssistantTurn } from "@/lib/assistant/generate-turn";
 import { deriveCurrentCodingStage } from "@/lib/assistant/stages";
 import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
+import { persistSessionSnapshots } from "@/lib/session/snapshots";
 import { resolveLowCostMode } from "@/lib/usage/cost";
 
 type RouteContext = {
@@ -114,6 +115,14 @@ export async function POST(_: Request, { params }: RouteContext) {
     });
     events.push(decisionEvent);
   }
+
+  await persistSessionSnapshots({
+    sessionId: id,
+    stage: currentStage,
+    source: turn.source,
+    signals: turn.signals,
+    decision: turn.decision,
+  });
 
   const aiSpokeEvent = await prisma.sessionEvent.create({
     data: {

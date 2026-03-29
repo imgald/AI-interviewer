@@ -54,6 +54,9 @@ type CandidateSignalSummary = {
   algorithmChoice?: string;
   edgeCaseAwareness?: string;
   behavior?: string;
+  reasoningDepth?: string;
+  testingDiscipline?: string;
+  complexityRigor?: string;
   confidence?: number;
   evidence?: string[];
   summary?: string;
@@ -222,9 +225,11 @@ function scoreCommunication(userTurns: TranscriptLike[], latestSignal: Candidate
       ? 0
       : userTurns.reduce((total, turn) => total + turn.text.split(/\s+/).filter(Boolean).length, 0) / userTurns.length;
   const score =
-    latestSignal?.communication === "clear"
+    latestSignal?.communication === "clear" && latestSignal?.reasoningDepth === "deep"
       ? 5
-      : latestSignal?.communication === "mixed"
+      : latestSignal?.communication === "clear"
+        ? 5
+        : latestSignal?.communication === "mixed"
         ? 3
         : userTurns.length >= 2 && averageLength >= 8
           ? 4
@@ -323,8 +328,13 @@ function scoreTestingAndComplexity(
   latestUserText: string,
   latestSignal: CandidateSignalSummary | null,
 ): DimensionScore {
-  const discussedTesting = latestSignal?.edgeCaseAwareness === "present" || /\b(edge case|test|empty|duplicate|null)\b/.test(latestUserText);
-  const discussedComplexity = /\b(time complexity|space complexity|o\(|linear|quadratic)\b/.test(latestUserText);
+  const discussedTesting =
+    latestSignal?.testingDiscipline === "strong" ||
+    latestSignal?.edgeCaseAwareness === "present" ||
+    /\b(edge case|test|empty|duplicate|null)\b/.test(latestUserText);
+  const discussedComplexity =
+    latestSignal?.complexityRigor === "strong" ||
+    /\b(time complexity|space complexity|o\(|linear|quadratic)\b/.test(latestUserText);
   const reachedStage = stageJourney.includes("Testing And Complexity") || stageJourney.includes("Wrap Up");
   const score = reachedStage && discussedTesting && discussedComplexity ? 5 : reachedStage || discussedTesting || discussedComplexity ? 3 : 1;
 
@@ -480,6 +490,14 @@ function collectStrengths(
     strengths.push("Behavior: the candidate explained the solution in a structured sequence rather than a purely reactive way.");
   }
 
+  if (latestSignal?.reasoningDepth === "deep") {
+    strengths.push("Reasoning depth: the candidate explained why the solution works instead of only naming the approach.");
+  }
+
+  if (latestSignal?.complexityRigor === "strong") {
+    strengths.push("Complexity rigor: the candidate articulated final complexity and tradeoffs clearly.");
+  }
+
   if (passedRuns > 0) {
     strengths.push("Code execution: at least one passing run was achieved.");
   }
@@ -509,6 +527,14 @@ function collectWeaknesses(
     weaknesses.push("Momentum: the latest candidate state still looked stuck, so the interviewer had to constrain the next step heavily.");
   }
 
+  if (latestSignal?.reasoningDepth === "thin") {
+    weaknesses.push("Reasoning depth: the candidate often named a direction without fully explaining why it works.");
+  }
+
+  if (latestSignal?.testingDiscipline === "missing") {
+    weaknesses.push("Testing discipline: the candidate did not present a concrete test plan before closing the loop.");
+  }
+
   if (hintRequestedCount >= 2) {
     weaknesses.push("The candidate needed repeated hints, which may indicate difficulty sustaining momentum independently.");
   }
@@ -534,6 +560,10 @@ function collectMissedSignals(
 
   if (!/\b(time complexity|space complexity|o\(|linear|quadratic)\b/.test(latestUserText)) {
     missed.push("The candidate did not clearly articulate final time and space complexity.");
+  }
+
+  if (latestSignal?.reasoningDepth === "thin") {
+    missed.push("The session never fully surfaced the candidate's reasoning depth behind the chosen approach.");
   }
 
   if (latestSignal?.edgeCaseAwareness === "missing") {
@@ -564,6 +594,14 @@ function collectImprovementPlan(
 
   if ((dimensions.find((dimension) => dimension.key === "testing_and_complexity")?.score ?? 0) < 5) {
     improvements.push("Always finish by naming key edge cases and the final time/space complexity.");
+  }
+
+  if (latestSignal?.reasoningDepth === "thin") {
+    improvements.push("When you state an approach, immediately explain why it works on one concrete example or invariant.");
+  }
+
+  if (latestSignal?.complexityRigor === "missing") {
+    improvements.push("Practice ending each solution with explicit time complexity, space complexity, and one tradeoff.");
   }
 
   if (latestSignal?.behavior === "overthinking") {
@@ -638,3 +676,4 @@ function stringValue(value: unknown) {
 function truncate(value: string, maxLength: number) {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength - 3)}...`;
 }
+

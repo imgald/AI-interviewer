@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 
@@ -24,9 +24,13 @@ type CandidateState = {
   algorithmChoice?: string;
   edgeCaseAwareness?: string;
   behavior?: string;
+  reasoningDepth?: string;
+  testingDiscipline?: string;
+  complexityRigor?: string;
   confidence?: number;
   evidence?: string[];
   summary?: string;
+  trendSummary?: string;
 };
 
 type LatestDecision = {
@@ -231,6 +235,9 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
                 <MetricRow label="Algorithm Choice" value={reportJson.candidateState.algorithmChoice ?? "unknown"} />
                 <MetricRow label="Edge Cases" value={reportJson.candidateState.edgeCaseAwareness ?? "unknown"} />
                 <MetricRow label="Behavior" value={reportJson.candidateState.behavior ?? "unknown"} />
+                <MetricRow label="Reasoning Depth" value={reportJson.candidateState.reasoningDepth ?? "unknown"} />
+                <MetricRow label="Testing Discipline" value={reportJson.candidateState.testingDiscipline ?? "unknown"} />
+                <MetricRow label="Complexity Rigor" value={reportJson.candidateState.complexityRigor ?? "unknown"} />
                 <MetricRow
                   label="Confidence"
                   value={
@@ -239,6 +246,12 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
                       : "unknown"
                   }
                 />
+                {reportJson.candidateState.trendSummary ? (
+                  <div style={listItemStyle}>
+                    <strong>Trend</strong>
+                    <p style={{ ...mutedParagraphStyle, marginTop: 8 }}>{reportJson.candidateState.trendSummary}</p>
+                  </div>
+                ) : null}
                 {Array.isArray(reportJson.candidateState.evidence) && reportJson.candidateState.evidence.length > 0 ? (
                   <div style={{ display: "grid", gap: 8 }}>
                     <strong>Evidence</strong>
@@ -860,3 +873,4 @@ const miniPreStyle = {
   overflowX: "auto" as const,
   fontSize: 12,
 } as const;
+

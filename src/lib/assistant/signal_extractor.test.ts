@@ -42,6 +42,7 @@ describe("extractCandidateSignals", () => {
     expect(snapshot.algorithmChoice).toBe("strong");
     expect(snapshot.communication).toBe("clear");
     expect(snapshot.behavior).toBe("structured");
+    expect(snapshot.reasoningDepth).toBe("deep");
   });
 
   it("marks edge-case awareness as present when boundary conditions are named", () => {
@@ -60,5 +61,49 @@ describe("extractCandidateSignals", () => {
 
     expect(snapshot.edgeCaseAwareness).toBe("present");
     expect(snapshot.progress).toBe("done");
+    expect(snapshot.testingDiscipline).toBe("strong");
+  });
+
+  it("marks thin reasoning and missing complexity rigor when the candidate only names a vague idea", () => {
+    const snapshot = extractCandidateSignals({
+      currentStage: "APPROACH_DISCUSSION",
+      recentTranscripts: [{ speaker: "USER", text: "Maybe sort it and then return the answer." }],
+      latestExecutionRun: null,
+    });
+
+    expect(snapshot.reasoningDepth).toBe("thin");
+    expect(snapshot.complexityRigor).toBe("missing");
+  });
+
+  it("adds a trend summary when recent signal snapshots show state change", () => {
+    const snapshot = extractCandidateSignals({
+      currentStage: "TESTING_AND_COMPLEXITY",
+      recentTranscripts: [
+        {
+          speaker: "USER",
+          text: "I would test empty input and duplicates, and the final time complexity is O(n log k) with O(k) extra space.",
+        },
+      ],
+      recentEvents: [
+        {
+          eventType: "SIGNAL_SNAPSHOT_RECORDED",
+          payloadJson: {
+            signals: {
+              progress: "progressing",
+              codeQuality: "partial",
+              edgeCaseAwareness: "missing",
+              reasoningDepth: "moderate",
+              testingDiscipline: "missing",
+              complexityRigor: "missing",
+            },
+          },
+        },
+      ],
+      latestExecutionRun: {
+        status: "PASSED",
+      },
+    });
+
+    expect(snapshot.trendSummary).toMatch(/progress moved|testing discipline moved|complexity rigor changed/i);
   });
 });

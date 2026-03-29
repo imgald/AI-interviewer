@@ -7,6 +7,7 @@ import {
   type CodingInterviewHintLevel,
   type CodingInterviewHintStyle,
 } from "@/lib/assistant/policy";
+import { buildFallbackReplyFromDecision, describeReplyStrategy } from "@/lib/assistant/reply_strategy";
 import { extractCandidateSignalsSmart, type CandidateSignalSnapshot } from "@/lib/assistant/signal_extractor";
 import {
   describeCodingStage,
@@ -603,6 +604,8 @@ function buildSystemPrompt() {
     "Keep replies concise, natural, and interview-like.",
     "Sound like a thoughtful human interviewer rather than a chatbot.",
     "Ask one focused follow-up question at a time.",
+    "Do not over-praise. At most use one short acknowledgement clause before the real interviewer move.",
+    "Avoid generic filler like 'keep going' or 'that sounds reasonable' unless you immediately follow with a concrete, high-signal question.",
     "You must follow the supplied decision engine output for this turn.",
     "Treat the decision engine question as the required next interviewer move unless it would be unsafe or nonsensical.",
     "Do not replace a concrete decision-engine question with generic encouragement.",
@@ -643,12 +646,17 @@ function buildInterviewerPrompt(
     `Stage guidance: ${stageGuidance(stage)}`,
     `Interview policy:\n${formatCodingInterviewPolicy(policy)}`,
     `Candidate state snapshot: ${signals.summary}`,
+    `Candidate state trend: ${signals.trendSummary ?? "No clear state trend yet."}`,
     `Candidate state confidence: ${signals.confidence}`,
     `Candidate evidence:\n- ${signals.evidence.join("\n- ")}`,
+    `Reasoning depth: ${signals.reasoningDepth}`,
+    `Testing discipline: ${signals.testingDiscipline}`,
+    `Complexity rigor: ${signals.complexityRigor}`,
     `Decision engine output: action=${decision.action}, target=${decision.target}, confidence=${decision.confidence}.`,
     `Decision reason: ${decision.reason}`,
     `Preferred next interviewer question: ${decision.question}`,
     `Required turn contract: the reply must execute decision action "${decision.action}" and target "${decision.target}".`,
+    `Reply strategy: ${describeReplyStrategy(decision, signals)}`,
     decision.hintStyle ? `Required hint style: ${decision.hintStyle}` : null,
     decision.hintLevel ? `Required hint level: ${decision.hintLevel}` : null,
     decision.suggestedStage ? `Suggested next stage after this turn: ${decision.suggestedStage}` : null,
@@ -665,6 +673,7 @@ function buildInterviewerPrompt(
     "The reply should explicitly align with the decision engine target and should usually reuse the decision engine question semantically, even if you rephrase it naturally.",
     "If the decision action is give_hint, provide a hint and not a generic probe.",
     "If the decision action is ask_for_test_case or ask_for_complexity, ask exactly for those signals rather than a broad open-ended follow-up.",
+    "Prefer 1 or 2 sentences. The last sentence should usually be the concrete follow-up or instruction.",
     "Advance the interview deliberately. Stay in the current stage unless there is a clear reason to move forward.",
     "Do not repeat the previous AI sentence verbatim.",
   ]
@@ -867,6 +876,27 @@ function generateFallbackTurn(
         "Say a little more about that. Pick one example input and narrate exactly what your algorithm would do.",
       ),
       suggestedStage: "APPROACH_DISCUSSION",
+      source: "fallback",
+      signals,
+      decision,
+      providerFailure,
+      policyAction: policy.recommendedAction,
+      policyReason: policy.reason,
+      escalationReason: policy.escalationReason,
+    };
+  }
+
+  const strategicReply = buildFallbackReplyFromDecision({
+    decision,
+    signals,
+    currentStage,
+    previousAiTurn: latestAiTurn?.text,
+  });
+
+  if (strategicReply) {
+    return {
+      reply: strategicReply,
+      suggestedStage: decision.suggestedStage ?? currentStage,
       source: "fallback",
       signals,
       decision,
@@ -1239,7 +1269,7 @@ function enforceDecisionCompliance(
   decision: CandidateDecision,
   input: GenerateAssistantTurnInput,
 ) {
-  const normalized = reply.replace(/\s+/g, " ").trim();
+  const normalized = collapseReply(reply);
   if (!normalized) {
     return decision.question;
   }
@@ -1254,26 +1284,46 @@ function enforceDecisionCompliance(
     /\b(keep going|that sounds reasonable|reasonable direction|good start|nice start|continue|walk me through your approach step by step)\b/i.test(
       normalized,
     ) && !mentionsTarget;
+  const genericOpeningOnly =
+    /^(thanks|good|great|nice|okay|alright|sounds good|that makes sense)[,.!\s]+/i.test(normalized) &&
+    !normalized.includes("?") &&
+    !mentionsTarget;
 
   const requiresConcreteFollowup = ["ask_for_test_case", "ask_for_complexity", "ask_for_debug_plan", "give_hint"].includes(
     decision.action,
   );
+  const allowsNonQuestion = ["encourage_and_continue", "hold_and_listen"].includes(decision.action);
 
   if (requiresConcreteFollowup && !mentionsTarget) {
     return decision.question;
   }
 
   if (soundsGeneric) {
-    if (normalized.endsWith("?")) {
-      return `${normalized} ${decision.question}`;
-    }
+    return collapseReply(`${normalized} ${decision.question}`);
+  }
 
-    return `${normalized} ${decision.question}`;
+  if (genericOpeningOnly) {
+    return decision.question;
   }
 
   if (input.lowCostMode && normalized.split(/\s+/).length > 55) {
     return decision.question;
   }
 
+  const sentenceCount = normalized.split(/[.!?]+/).filter((part) => part.trim()).length;
+  if (sentenceCount > 2 && decision.action !== "give_hint" && decision.action !== "hold_and_listen") {
+    return decision.question;
+  }
+
+  if (!normalized.includes("?") && !allowsNonQuestion) {
+    return decision.question;
+  }
+
   return normalized;
+}
+
+function collapseReply(reply: string) {
+  const normalized = reply.replace(/\s+/g, " ").trim();
+  const sentences = normalized.match(/[^.!?]+[.!?]?/g)?.map((part) => part.trim()).filter(Boolean) ?? [];
+  return sentences.slice(0, 2).join(" ").trim();
 }

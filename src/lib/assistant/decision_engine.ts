@@ -22,7 +22,11 @@ export type CandidateDecisionAction =
   | "ask_for_test_case"
   | "ask_for_complexity"
   | "ask_for_debug_plan"
-  | "encourage_and_continue";
+  | "encourage_and_continue"
+  | "ask_for_reasoning"
+  | "probe_correctness"
+  | "probe_tradeoff"
+  | "hold_and_listen";
 
 export type CandidateDecisionTarget =
   | "understanding"
@@ -33,7 +37,9 @@ export type CandidateDecisionTarget =
   | "complexity"
   | "tradeoff"
   | "testing"
-  | "summary";
+  | "summary"
+  | "reasoning"
+  | "correctness";
 
 export type CandidateDecision = {
   action: CandidateDecisionAction;
@@ -57,6 +63,12 @@ export function makeCandidateDecision(input: {
   const { currentStage, policy, signals, latestExecutionRun } = input;
   const repeatedFailures = countRecentFailedRuns(input.recentEvents ?? []);
   const repeatedHints = countRecentHints(input.recentEvents ?? []);
+  const latestTurns = (input.recentEvents ?? []).slice(-8);
+  const aiTurnCount = latestTurns.filter((event) => event.eventType === "AI_SPOKE").length;
+  const candidateTurnCount = latestTurns.filter((event) => event.eventType === "CANDIDATE_SPOKE").length;
+  const candidateHasFloor = candidateTurnCount > aiTurnCount;
+  const improvingTrend = looksImproving(signals.trendSummary);
+  const unstableTrend = looksUnstable(signals.trendSummary);
 
   if (policy.shouldServeHint) {
     return {
@@ -149,9 +161,35 @@ export function makeCandidateDecision(input: {
   }
 
   if (currentStage === "APPROACH_DISCUSSION") {
+    if (unstableTrend && signals.reasoningDepth !== "deep") {
+      return {
+        action: "ask_for_reasoning",
+        target: "reasoning",
+        question:
+          "Let's reset on the core logic. In one concrete example, what state are you tracking, how does it change, and why does that produce the right output?",
+        reason: "The recent candidate-state trend looks unstable, so the interviewer should force a concrete reasoning reset instead of another broad prompt.",
+        confidence: 0.91,
+        suggestedStage: "APPROACH_DISCUSSION",
+        policyAction: "PROBE_APPROACH",
+      };
+    }
+
+    if (signals.reasoningDepth === "thin" && signals.communication !== "unclear") {
+      return {
+        action: "ask_for_reasoning",
+        target: "reasoning",
+        question:
+          "Make the reasoning explicit for me. Why does this approach work, and what exact state or invariant makes you confident it stays correct on a concrete example?",
+        reason: "The candidate named a direction, but the reasoning behind it is still too thin for a strong interview signal.",
+        confidence: 0.9,
+        suggestedStage: "APPROACH_DISCUSSION",
+        policyAction: "PROBE_APPROACH",
+      };
+    }
+
     if (signals.understanding === "clear" && signals.algorithmChoice === "suboptimal") {
       return {
-        action: "ask_followup",
+        action: "probe_tradeoff",
         target: "tradeoff",
         question:
           "Your framing is clear. Now push on the algorithm choice itself: what would the runtime be here, and is there a more efficient pattern or data structure you would consider instead?",
@@ -164,7 +202,7 @@ export function makeCandidateDecision(input: {
 
     if (signals.algorithmChoice === "suboptimal") {
       return {
-        action: "ask_followup",
+        action: "probe_tradeoff",
         target: "tradeoff",
         question: "Can you compare that idea against a more efficient alternative and explain what tradeoff you are making?",
         reason: "The current algorithm choice still sounds weaker than it needs to be.",
@@ -186,6 +224,18 @@ export function makeCandidateDecision(input: {
       };
     }
 
+    if (improvingTrend) {
+      return {
+        action: "encourage_and_continue",
+        target: "implementation",
+        question: "This is getting sharper. Go ahead and implement it, and narrate the one invariant or state update that matters most.",
+        reason: "The candidate-state trend is improving, so the interviewer should stop over-probing and let the implementation begin.",
+        confidence: 0.8,
+        suggestedStage: "IMPLEMENTATION",
+        policyAction: "LET_IMPLEMENT",
+      };
+    }
+
     return {
       action: "encourage_and_continue",
       target: "implementation",
@@ -198,6 +248,47 @@ export function makeCandidateDecision(input: {
   }
 
   if (currentStage === "IMPLEMENTATION") {
+    if (unstableTrend && signals.progress !== "done") {
+      return {
+        action: "ask_followup",
+        target: "implementation",
+        question:
+          "Pause on the full solution for a second. What exact state update or branch keeps drifting, and what should it do on one tiny input?",
+        reason: "The candidate-state trend suggests the implementation is wobbling, so the interviewer should localize the next move.",
+        confidence: 0.86,
+        suggestedStage: "IMPLEMENTATION",
+        policyAction: "LET_IMPLEMENT",
+      };
+    }
+
+    if (signals.progress === "progressing" && signals.behavior === "structured" && candidateHasFloor) {
+      return {
+        action: "hold_and_listen",
+        target: "implementation",
+        question: "Continue. As you code, call out just the one branch or invariant that is easiest to get wrong.",
+        reason: "The candidate is progressing in a structured way, so the interviewer should avoid over-interrupting and only lightly steer the implementation.",
+        confidence: 0.72,
+        suggestedStage: "IMPLEMENTATION",
+        policyAction: "LET_IMPLEMENT",
+      };
+    }
+
+    if (
+      (signals.codeQuality === "correct" || latestExecutionRun?.status === "PASSED") &&
+      signals.reasoningDepth === "thin"
+    ) {
+      return {
+        action: "probe_correctness",
+        target: "correctness",
+        question:
+          "Before we move on, convince me this implementation is correct on one concrete example. What invariant or reasoning step makes it safe?",
+        reason: "The implementation looks close, but the correctness argument is still too thin for a strong signal.",
+        confidence: 0.89,
+        suggestedStage: "IMPLEMENTATION",
+        policyAction: "LET_IMPLEMENT",
+      };
+    }
+
     if (
       (signals.codeQuality === "correct" || latestExecutionRun?.status === "PASSED") &&
       (signals.edgeCaseAwareness === "missing" || signals.edgeCaseAwareness === "partial")
@@ -227,7 +318,7 @@ export function makeCandidateDecision(input: {
     }
 
     return {
-      action: "encourage_and_continue",
+      action: "hold_and_listen",
       target: "implementation",
       question: "Keep going with the implementation. As you write it, call out the one invariant or pointer update that keeps the solution correct.",
       reason: "The candidate still appears to be making progress in implementation.",
@@ -238,13 +329,39 @@ export function makeCandidateDecision(input: {
   }
 
   if (currentStage === "TESTING_AND_COMPLEXITY") {
-    if (signals.edgeCaseAwareness === "missing") {
+    if (unstableTrend && signals.testingDiscipline !== "strong") {
+      return {
+        action: "ask_for_test_case",
+        target: "testing",
+        question:
+          "Let's make validation concrete. Name the two highest-risk edge cases you would run next, and what result you expect from each.",
+        reason: "The latest state trend has not stabilized, so the interviewer should ask for explicit test evidence before wrapping up.",
+        confidence: 0.88,
+        suggestedStage: "TESTING_AND_COMPLEXITY",
+        policyAction: "VALIDATE_AND_TEST",
+      };
+    }
+
+    if (signals.testingDiscipline === "missing" || signals.edgeCaseAwareness === "missing") {
       return {
         action: "ask_for_test_case",
         target: "testing",
         question: "Before we wrap, which edge cases would you test first, and why are those the highest-risk cases for this solution?",
         reason: "The candidate has not yet shown enough validation discipline.",
         confidence: 0.84,
+        suggestedStage: "TESTING_AND_COMPLEXITY",
+        policyAction: "VALIDATE_AND_TEST",
+      };
+    }
+
+    if (signals.complexityRigor !== "strong") {
+      return {
+        action: "ask_for_complexity",
+        target: "complexity",
+        question:
+          "Now pin down the final time and space complexity, and tell me what tradeoff you accepted to get there.",
+        reason: "The candidate has not yet articulated complexity rigor strongly enough for a clean close-out.",
+        confidence: 0.87,
         suggestedStage: "TESTING_AND_COMPLEXITY",
         policyAction: "VALIDATE_AND_TEST",
       };
@@ -283,6 +400,26 @@ export function makeCandidateDecision(input: {
     suggestedStage: "WRAP_UP",
     policyAction: "WRAP_UP",
   };
+}
+
+function looksImproving(trendSummary?: string) {
+  if (!trendSummary) {
+    return false;
+  }
+
+  return /\b(moved from (stuck|partial|missing) to (progressing|done|present|strong|moderate|deep)|changed from buggy to correct)\b/i.test(
+    trendSummary,
+  );
+}
+
+function looksUnstable(trendSummary?: string) {
+  if (!trendSummary) {
+    return false;
+  }
+
+  return /\b(moved from progressing to stuck|changed from correct to buggy|changed from present to missing|changed from deep to thin|changed from strong to missing)\b/i.test(
+    trendSummary,
+  );
 }
 
 function countRecentFailedRuns(events: Array<{ eventType: string; payloadJson?: unknown }>) {

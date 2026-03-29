@@ -1,4 +1,4 @@
-import Link from "next/link";
+﻿import Link from "next/link";
 import { buildUnifiedOpsFeed, getAdminProfileDetail, listAdminProfiles, type OpsFeedScope } from "@/lib/admin/ops";
 
 type AdminPageProps = {
@@ -163,16 +163,23 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                         <div style={panelStyle}>
                           <strong>Latest Candidate State</strong>
                           {detail.sessionSummary.latestSignals ? (
-                            <dl style={definitionListStyle}>
-                              {Object.entries(detail.sessionSummary.latestSignals).map(([key, value]) => (
-                                <div key={key} style={definitionRowStyle}>
-                                  <dt style={definitionTermStyle}>{formatLabel(key)}</dt>
-                                  <dd style={definitionValueStyle}>
-                                    {Array.isArray(value) ? value.join(", ") : String(value)}
-                                  </dd>
-                                </div>
-                              ))}
-                            </dl>
+                            <>
+                              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", marginTop: 12, marginBottom: 12 }}>
+                                <MetricCard label="Reasoning Depth" value={String(detail.sessionSummary.latestSignals.reasoningDepth ?? "unknown")} />
+                                <MetricCard label="Testing Discipline" value={String(detail.sessionSummary.latestSignals.testingDiscipline ?? "unknown")} />
+                                <MetricCard label="Complexity Rigor" value={String(detail.sessionSummary.latestSignals.complexityRigor ?? "unknown")} />
+                              </div>
+                              <dl style={definitionListStyle}>
+                                {Object.entries(detail.sessionSummary.latestSignals).map(([key, value]) => (
+                                  <div key={key} style={definitionRowStyle}>
+                                    <dt style={definitionTermStyle}>{formatLabel(key)}</dt>
+                                    <dd style={definitionValueStyle}>
+                                      {Array.isArray(value) ? value.join(", ") : String(value)}
+                                    </dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            </>
                           ) : (
                             <p style={{ margin: "10px 0 0", color: "var(--muted)" }}>No signal snapshot recorded yet.</p>
                           )}
@@ -468,3 +475,4 @@ const topLinkStyle = {
 function formatLabel(value: string) {
   return value.replace(/([A-Z])/g, " $1").replaceAll("_", " ").trim();
 }
+

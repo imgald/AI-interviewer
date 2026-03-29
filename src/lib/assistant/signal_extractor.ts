@@ -24,6 +24,9 @@ export type CandidateCodeQualityState = "unknown" | "buggy" | "partial" | "corre
 export type CandidateAlgorithmChoiceState = "unknown" | "suboptimal" | "reasonable" | "strong";
 export type CandidateEdgeCaseAwarenessState = "missing" | "partial" | "present";
 export type CandidateBehaviorState = "structured" | "overthinking" | "rushing" | "balanced";
+export type CandidateReasoningDepthState = "thin" | "moderate" | "deep";
+export type CandidateTestingDisciplineState = "missing" | "partial" | "strong";
+export type CandidateComplexityRigorState = "missing" | "partial" | "strong";
 
 export type CandidateSignalSnapshot = {
   understanding: CandidateUnderstandingState;
@@ -33,9 +36,13 @@ export type CandidateSignalSnapshot = {
   algorithmChoice: CandidateAlgorithmChoiceState;
   edgeCaseAwareness: CandidateEdgeCaseAwarenessState;
   behavior: CandidateBehaviorState;
+  reasoningDepth: CandidateReasoningDepthState;
+  testingDiscipline: CandidateTestingDisciplineState;
+  complexityRigor: CandidateComplexityRigorState;
   confidence: number;
   evidence: string[];
   summary: string;
+  trendSummary?: string;
   source?: "heuristic" | "gemini-observer" | "openai-observer";
 };
 
@@ -52,6 +59,7 @@ export function extractCandidateSignals(input: {
   const latestRun = input.latestExecutionRun;
   const recentEvents = input.recentEvents ?? [];
   const evidence: string[] = [];
+  const priorSignals = collectPriorSignalSnapshots(recentEvents);
 
   const understanding = resolveUnderstandingState(normalizedUserText, input.currentStage, evidence);
   const progress = resolveProgressState(normalizedUserText, latestRun, recentEvents, evidence);
@@ -60,12 +68,28 @@ export function extractCandidateSignals(input: {
   const algorithmChoice = resolveAlgorithmChoiceState(normalizedUserText, input.currentStage, evidence);
   const edgeCaseAwareness = resolveEdgeCaseAwarenessState(normalizedUserText, latestRun, evidence);
   const behavior = resolveBehaviorState(normalizedUserText, recentUserTurns, evidence);
+  const reasoningDepth = resolveReasoningDepthState(normalizedUserText, recentUserTurns, evidence);
+  const testingDiscipline = resolveTestingDisciplineState(normalizedUserText, latestRun, evidence);
+  const complexityRigor = resolveComplexityRigorState(normalizedUserText, input.currentStage, evidence);
   const confidence = resolveConfidence({
     recentUserTurns,
     latestRun,
     understanding,
     progress,
   });
+  const trendSummary = buildTrendSummary(priorSignals, {
+    understanding,
+    progress,
+    codeQuality,
+    edgeCaseAwareness,
+    reasoningDepth,
+    testingDiscipline,
+    complexityRigor,
+  });
+
+  if (trendSummary) {
+    evidence.push(trendSummary);
+  }
 
   return {
     understanding,
@@ -75,6 +99,9 @@ export function extractCandidateSignals(input: {
     algorithmChoice,
     edgeCaseAwareness,
     behavior,
+    reasoningDepth,
+    testingDiscipline,
+    complexityRigor,
     confidence,
     evidence: dedupeEvidence(evidence).slice(0, 6),
     summary: buildSignalSummary({
@@ -85,7 +112,11 @@ export function extractCandidateSignals(input: {
       algorithmChoice,
       edgeCaseAwareness,
       behavior,
+      reasoningDepth,
+      testingDiscipline,
+      complexityRigor,
     }),
+    trendSummary: trendSummary ?? undefined,
     source: "heuristic",
   };
 }
@@ -297,6 +328,83 @@ function resolveBehaviorState(normalizedUserText: string, recentUserTurns: Trans
   return "balanced";
 }
 
+function resolveReasoningDepthState(
+  normalizedUserText: string,
+  recentUserTurns: TranscriptLike[],
+  evidence: string[],
+): CandidateReasoningDepthState {
+  const explainsWhy = /\b(because|therefore|which means|so that|reason|invariant|tradeoff)\b/.test(normalizedUserText);
+  const usesConcreteWalkthrough = /\b(example|step by step|walk through|for instance)\b/.test(normalizedUserText);
+  const totalWords = recentUserTurns.reduce(
+    (sum, turn) => sum + turn.text.split(/\s+/).filter(Boolean).length,
+    0,
+  );
+
+  if (explainsWhy && usesConcreteWalkthrough && totalWords >= 28) {
+    evidence.push("Candidate tied the approach to reasons and walked through a concrete example.");
+    return "deep";
+  }
+
+  if (explainsWhy || totalWords >= 16) {
+    evidence.push("Candidate exposed some reasoning, but the chain of logic is still only partially explicit.");
+    return "moderate";
+  }
+
+  evidence.push("Candidate mostly named an answer without unpacking the reasoning behind it.");
+  return "thin";
+}
+
+function resolveTestingDisciplineState(
+  normalizedUserText: string,
+  latestRun: ExecutionRunLike | null | undefined,
+  evidence: string[],
+): CandidateTestingDisciplineState {
+  const mentionedTesting = /\b(test|test case|edge case|boundary|corner case|empty|single element|duplicate)\b/.test(
+    normalizedUserText,
+  );
+  const multipleTestIdeas =
+    /(empty|single element|duplicate|boundary|corner case).*(empty|single element|duplicate|boundary|corner case)/.test(
+      normalizedUserText,
+    );
+
+  if (mentionedTesting && multipleTestIdeas) {
+    evidence.push("Candidate named multiple concrete tests or high-risk boundary cases.");
+    return "strong";
+  }
+
+  if (mentionedTesting || latestRun?.status === "PASSED") {
+    evidence.push("Candidate showed some validation instinct, but the test plan is still incomplete.");
+    return "partial";
+  }
+
+  evidence.push("Candidate has not yet shown a concrete testing habit.");
+  return "missing";
+}
+
+function resolveComplexityRigorState(
+  normalizedUserText: string,
+  currentStage: CodingInterviewStage,
+  evidence: string[],
+): CandidateComplexityRigorState {
+  const mentionsComplexity = /\b(time complexity|space complexity|big-?o|o\([^)]+\)|linear|quadratic|logarithmic)\b/.test(
+    normalizedUserText,
+  );
+  const mentionsTradeoff = /\b(tradeoff|memory|runtime|space|optimi[sz])\b/.test(normalizedUserText);
+
+  if (mentionsComplexity && mentionsTradeoff) {
+    evidence.push("Candidate discussed complexity with at least one tradeoff dimension.");
+    return "strong";
+  }
+
+  if (mentionsComplexity || currentStage === "TESTING_AND_COMPLEXITY") {
+    evidence.push("Candidate touched complexity, but not yet with full rigor.");
+    return "partial";
+  }
+
+  evidence.push("Candidate has not yet articulated a confident complexity story.");
+  return "missing";
+}
+
 function resolveConfidence(input: {
   recentUserTurns: TranscriptLike[];
   latestRun?: ExecutionRunLike | null;
@@ -335,11 +443,79 @@ function buildSignalSummary(input: Omit<CandidateSignalSnapshot, "confidence" | 
     `algorithm choice is ${input.algorithmChoice}`,
     `edge-case awareness is ${input.edgeCaseAwareness}`,
     `behavior is ${input.behavior}`,
+    `reasoning depth is ${input.reasoningDepth}`,
+    `testing discipline is ${input.testingDiscipline}`,
+    `complexity rigor is ${input.complexityRigor}`,
   ].join(", ");
 }
 
 function dedupeEvidence(evidence: string[]) {
   return evidence.filter((item, index) => evidence.indexOf(item) === index);
+}
+
+function collectPriorSignalSnapshots(events: SessionEventLike[]) {
+  return events
+    .filter((event) => event.eventType === "SIGNAL_SNAPSHOT_RECORDED")
+    .slice(-3)
+    .map((event) => {
+      const payload =
+        typeof event.payloadJson === "object" && event.payloadJson !== null
+          ? (event.payloadJson as Record<string, unknown>)
+          : {};
+      const signals =
+        typeof payload.signals === "object" && payload.signals !== null
+          ? (payload.signals as Partial<CandidateSignalSnapshot>)
+          : {};
+      return signals;
+    });
+}
+
+function buildTrendSummary(
+  previousSignals: Array<Partial<CandidateSignalSnapshot>>,
+  current: {
+    understanding: CandidateUnderstandingState;
+    progress: CandidateProgressState;
+    codeQuality: CandidateCodeQualityState;
+    edgeCaseAwareness: CandidateEdgeCaseAwarenessState;
+    reasoningDepth: CandidateReasoningDepthState;
+    testingDiscipline: CandidateTestingDisciplineState;
+    complexityRigor: CandidateComplexityRigorState;
+  },
+) {
+  const previous = previousSignals.at(-1);
+  if (!previous) {
+    return null;
+  }
+
+  const changes: string[] = [];
+
+  if (previous.progress && previous.progress !== current.progress) {
+    changes.push(`progress moved from ${previous.progress} to ${current.progress}`);
+  }
+  if (previous.codeQuality && previous.codeQuality !== current.codeQuality) {
+    changes.push(`code quality changed from ${previous.codeQuality} to ${current.codeQuality}`);
+  }
+  if (previous.edgeCaseAwareness && previous.edgeCaseAwareness !== current.edgeCaseAwareness) {
+    changes.push(`edge-case awareness shifted from ${previous.edgeCaseAwareness} to ${current.edgeCaseAwareness}`);
+  }
+  if (previous.reasoningDepth && previous.reasoningDepth !== current.reasoningDepth) {
+    changes.push(`reasoning depth moved from ${previous.reasoningDepth} to ${current.reasoningDepth}`);
+  }
+  if (previous.testingDiscipline && previous.testingDiscipline !== current.testingDiscipline) {
+    changes.push(`testing discipline moved from ${previous.testingDiscipline} to ${current.testingDiscipline}`);
+  }
+  if (previous.complexityRigor && previous.complexityRigor !== current.complexityRigor) {
+    changes.push(`complexity rigor changed from ${previous.complexityRigor} to ${current.complexityRigor}`);
+  }
+  if (previous.understanding && previous.understanding !== current.understanding) {
+    changes.push(`understanding changed from ${previous.understanding} to ${current.understanding}`);
+  }
+
+  if (changes.length === 0) {
+    return "Candidate state is broadly stable relative to the previous snapshot.";
+  }
+
+  return `Recent state trend: ${changes.slice(0, 3).join("; ")}.`;
 }
 
 function resolveObserverProviderSequence() {
@@ -479,16 +655,24 @@ function buildSignalObserverPrompt(
     .slice(-8)
     .map((event) => event.eventType)
     .join(", ");
+  const priorSignalHistory = collectPriorSignalSnapshots(input.recentEvents ?? [])
+    .map((signals, index) => `Snapshot ${index + 1}: ${JSON.stringify(signals)}`)
+    .join("\n");
 
   return [
     "You are an interview observer. Infer the candidate state from the recent coding interview evidence.",
+    "Your job is not to coach or answer. Your job is to classify the candidate's current interview state as an evaluator.",
+    "Use the heuristic baseline only as a fallback reference, not as ground truth.",
+    "Prefer the most recent user turns, latest code run result, and latest interviewer decision signals over older context.",
+    "If the evidence is mixed, choose the more conservative state rather than the more flattering one.",
     `Current stage: ${input.currentStage}`,
     `Recent conversation:\n${recentTurns || "No turns."}`,
     `Recent execution run: ${latestRun}`,
     `Recent events: ${recentEvents || "none"}`,
+    `Recent candidate-state history:\n${priorSignalHistory || "none"}`,
     `Heuristic baseline: ${JSON.stringify(heuristic)}`,
     "Return JSON only with keys:",
-    "understanding, progress, communication, codeQuality, algorithmChoice, edgeCaseAwareness, behavior, confidence, evidence, summary",
+    "understanding, progress, communication, codeQuality, algorithmChoice, edgeCaseAwareness, behavior, reasoningDepth, testingDiscipline, complexityRigor, confidence, evidence, summary, trendSummary",
     "Allowed values:",
     'understanding: "confused" | "partial" | "clear"',
     'progress: "stuck" | "progressing" | "done"',
@@ -497,8 +681,13 @@ function buildSignalObserverPrompt(
     'algorithmChoice: "unknown" | "suboptimal" | "reasonable" | "strong"',
     'edgeCaseAwareness: "missing" | "partial" | "present"',
     'behavior: "structured" | "overthinking" | "rushing" | "balanced"',
+    'reasoningDepth: "thin" | "moderate" | "deep"',
+    'testingDiscipline: "missing" | "partial" | "strong"',
+    'complexityRigor: "missing" | "partial" | "strong"',
     "evidence must be a short array of strings, max 4 items.",
     "summary must be one concise sentence.",
+    "trendSummary should be one short sentence describing how the current state compares with the recent candidate-state history.",
+    "Do not repeat the full heuristic baseline in summary or evidence unless the current evidence truly supports it.",
   ].join("\n\n");
 }
 
@@ -526,6 +715,9 @@ function parseObservedSignals(
       algorithmChoice: coerceEnum(parsed.algorithmChoice, ["unknown", "suboptimal", "reasonable", "strong"], heuristic.algorithmChoice),
       edgeCaseAwareness: coerceEnum(parsed.edgeCaseAwareness, ["missing", "partial", "present"], heuristic.edgeCaseAwareness),
       behavior: coerceEnum(parsed.behavior, ["structured", "overthinking", "rushing", "balanced"], heuristic.behavior),
+      reasoningDepth: coerceEnum(parsed.reasoningDepth, ["thin", "moderate", "deep"], heuristic.reasoningDepth),
+      testingDiscipline: coerceEnum(parsed.testingDiscipline, ["missing", "partial", "strong"], heuristic.testingDiscipline),
+      complexityRigor: coerceEnum(parsed.complexityRigor, ["missing", "partial", "strong"], heuristic.complexityRigor),
       confidence:
         typeof parsed.confidence === "number"
           ? Math.max(0.2, Math.min(0.95, Number(parsed.confidence.toFixed(2))))
@@ -535,6 +727,10 @@ function parseObservedSignals(
           ? parsed.evidence.filter((item): item is string => typeof item === "string").slice(0, 6)
           : heuristic.evidence,
       summary: typeof parsed.summary === "string" && parsed.summary.trim() ? parsed.summary.trim() : heuristic.summary,
+      trendSummary:
+        typeof parsed.trendSummary === "string" && parsed.trendSummary.trim()
+          ? parsed.trendSummary.trim()
+          : heuristic.trendSummary,
       source,
     };
   } catch {
