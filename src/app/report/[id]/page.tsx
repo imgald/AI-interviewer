@@ -164,6 +164,11 @@ type ReportJson = {
     rationale?: string;
     basis?: string;
     evidence?: string[];
+    evidenceRefs?: Array<{
+      kind?: string;
+      id?: string;
+      label?: string;
+    }>;
   }>;
   stageSections?: StageReplaySection[];
 };
@@ -435,6 +440,18 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
                         {item.evidence.map((point, pointIndex) => (
                           <div key={`rubric-summary-${index}-${pointIndex}`} style={listItemStyle}>
                             {point}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                    {Array.isArray(item.evidenceRefs) && item.evidenceRefs.length > 0 ? (
+                      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+                        <p style={{ ...mutedParagraphStyle, marginTop: 0 }}>
+                          <strong>Evidence refs:</strong>
+                        </p>
+                        {item.evidenceRefs.map((ref, refIndex) => (
+                          <div key={`rubric-summary-ref-${index}-${refIndex}`} style={listItemStyle}>
+                            {ref.label ?? `${ref.kind ?? "ref"}: ${ref.id ?? "unknown"}`}
                           </div>
                         ))}
                       </div>
@@ -1670,6 +1687,7 @@ const miniPreStyle = {
   overflowX: "auto" as const,
   fontSize: 12,
 } as const;
+
 
 
 

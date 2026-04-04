@@ -20,6 +20,7 @@ type SessionEventLike = {
 };
 
 type ExecutionRunLike = {
+  id?: string;
   status: "PASSED" | "FAILED" | "ERROR" | "TIMEOUT";
   stdout?: string | null;
   stderr?: string | null;
@@ -179,6 +180,11 @@ type RubricSummaryItem = {
   rationale: string;
   basis: string;
   evidence: string[];
+  evidenceRefs: Array<{
+    kind: "candidate_state_snapshot" | "decision_snapshot" | "execution_run";
+    id: string;
+    label: string;
+  }>;
 };
 
 type StageReplaySection = {
@@ -234,6 +240,9 @@ export function generateSessionReport(input: SessionReportInput): GeneratedSessi
   );
   const latestSignal = findLatestSignalSnapshot(input.events, input.candidateStateSnapshots ?? []);
   const latestDecision = findLatestDecisionSnapshot(input.events, input.interviewerDecisionSnapshots ?? []);
+  const latestSignalSnapshotRow = (input.candidateStateSnapshots ?? []).at(-1) ?? null;
+  const latestDecisionSnapshotRow = (input.interviewerDecisionSnapshots ?? []).at(-1) ?? null;
+  const latestExecutionRun = input.executionRuns.at(-1) ?? null;
   const latestIntent = findLatestIntentSnapshot(input.intentSnapshots ?? []);
   const latestTrajectory = findLatestTrajectorySnapshot(input.trajectorySnapshots ?? []);
   const hintRequestedCount = input.events.filter((event) => event.eventType === "HINT_REQUESTED").length;
@@ -290,7 +299,11 @@ export function generateSessionReport(input: SessionReportInput): GeneratedSessi
     failedRuns,
   });
   const stageSections = buildStageReplaySections(stageReplay);
-  const rubricSummary = buildRubricSummary(dimensions, latestSignal);
+  const rubricSummary = buildRubricSummary(dimensions, latestSignal, {
+    latestSignalSnapshotId: latestSignalSnapshotRow?.id ?? null,
+    latestDecisionSnapshotId: latestDecisionSnapshotRow?.id ?? null,
+    latestExecutionRunId: latestExecutionRun?.id ?? null,
+  });
   const sessionCritic = summarizeSessionCritic({
     events: input.events,
     latestSignals: latestSignal,
@@ -896,9 +909,50 @@ function buildMomentsOfTruth(input: {
   return moments.slice(0, 3);
 }
 
+function buildRubricEvidenceRefs(input: {
+  latestSignalSnapshotId: string | null;
+  latestDecisionSnapshotId: string | null;
+  latestExecutionRunId: string | null;
+  includeDecision?: boolean;
+  includeExecutionRun?: boolean;
+}) {
+  const refs: RubricSummaryItem["evidenceRefs"] = [];
+
+  if (input.latestSignalSnapshotId) {
+    refs.push({
+      kind: "candidate_state_snapshot",
+      id: input.latestSignalSnapshotId,
+      label: `Signal snapshot ${input.latestSignalSnapshotId}`,
+    });
+  }
+
+  if (input.includeDecision && input.latestDecisionSnapshotId) {
+    refs.push({
+      kind: "decision_snapshot",
+      id: input.latestDecisionSnapshotId,
+      label: `Decision snapshot ${input.latestDecisionSnapshotId}`,
+    });
+  }
+
+  if (input.includeExecutionRun && input.latestExecutionRunId) {
+    refs.push({
+      kind: "execution_run",
+      id: input.latestExecutionRunId,
+      label: `Execution run ${input.latestExecutionRunId}`,
+    });
+  }
+
+  return refs;
+}
+
 function buildRubricSummary(
   dimensions: DimensionScore[],
   latestSignal: CandidateSignalSummary | null,
+  refs: {
+    latestSignalSnapshotId: string | null;
+    latestDecisionSnapshotId: string | null;
+    latestExecutionRunId: string | null;
+  },
 ): RubricSummaryItem[] {
   const communication = dimensions.find((dimension) => dimension.key === "communication");
   const implementation = dimensions.find((dimension) => dimension.key === "implementation");
@@ -937,6 +991,13 @@ function buildRubricSummary(
             ? "Correctness signals were mixed: the solution direction was sound, but execution or debugging evidence stayed incomplete."
             : "Correctness evidence remained weak because the session never closed the loop on implementation or recovery.",
       evidence: [implementation?.evidence, debugging?.evidence].filter((item): item is string => Boolean(item)),
+      evidenceRefs: buildRubricEvidenceRefs({
+        latestSignalSnapshotId: refs.latestSignalSnapshotId,
+        latestDecisionSnapshotId: refs.latestDecisionSnapshotId,
+        latestExecutionRunId: refs.latestExecutionRunId,
+        includeDecision: true,
+        includeExecutionRun: true,
+      }),
     },
     {
       key: "complexity",
@@ -954,6 +1015,12 @@ function buildRubricSummary(
             ? "Some complexity evidence was present, but the tradeoff or final performance story stayed partial."
             : "Complexity rigor stayed weak or absent, so the performance story remained under-specified.",
       evidence: [testingAndComplexity?.evidence].filter((item): item is string => Boolean(item)),
+      evidenceRefs: buildRubricEvidenceRefs({
+        latestSignalSnapshotId: refs.latestSignalSnapshotId,
+        latestDecisionSnapshotId: refs.latestDecisionSnapshotId,
+        latestExecutionRunId: refs.latestExecutionRunId,
+        includeDecision: true,
+      }),
     },
     {
       key: "communication",
@@ -971,6 +1038,11 @@ function buildRubricSummary(
             ? "Communication was serviceable, but parts of the reasoning remained compressed."
             : "Communication gaps forced the interviewer to reconstruct the thought process repeatedly.",
       evidence: [communication?.evidence].filter((item): item is string => Boolean(item)),
+      evidenceRefs: buildRubricEvidenceRefs({
+        latestSignalSnapshotId: refs.latestSignalSnapshotId,
+        latestDecisionSnapshotId: refs.latestDecisionSnapshotId,
+        latestExecutionRunId: refs.latestExecutionRunId,
+      }),
     },
   ];
 }
@@ -1542,6 +1614,9 @@ function buildCounterfactualSummary(events: SessionEventLike[]): CounterfactualS
     shouldWaitBeforeIntervening: criticEvents.some((verdict) => verdict.shouldWaitBeforeIntervening === true),
   };
 }
+
+
+
 
 
 

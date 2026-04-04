@@ -65,7 +65,7 @@ describe("generateSessionReport", () => {
         { eventType: "HINT_SERVED", payloadJson: { hintLevel: "LIGHT", hintStyle: "APPROACH_NUDGE" } },
         { eventType: "CODE_RUN_COMPLETED", payloadJson: { status: "PASSED" } },
       ],
-      executionRuns: [{ status: "PASSED", stdout: "[1,2]" }],
+      executionRuns: [{ id: "run-0", status: "PASSED", stdout: "[1,2]" }],
     });
 
     const reportJson = report.reportJson as Record<string, unknown>;
@@ -105,6 +105,7 @@ describe("generateSessionReport", () => {
     expect(dimensions.some((dimension) => dimension.key === "independence")).toBe(true);
     expect((reportJson.latestDecision as Record<string, unknown>).policyArchetype).toBe("collaborative");
     expect((reportJson.latestDecision as Record<string, unknown>).blockedByInvariant).toBe("flow_preservation");
+    expect(Array.isArray((rubricSummary[0] as Record<string, unknown>).evidenceRefs)).toBe(true);
   });
 
   it("groups replay evidence around stage, signals, decisions, and code runs", () => {
@@ -154,7 +155,7 @@ describe("generateSessionReport", () => {
         },
         { eventType: "CODE_RUN_COMPLETED", payloadJson: { status: "PASSED" } },
       ],
-      executionRuns: [{ status: "PASSED", stdout: "ok" }],
+      executionRuns: [{ id: "run-1", status: "PASSED", stdout: "ok" }],
     });
 
     const stageReplay = (report.reportJson as Record<string, unknown>).stageReplay as Array<Record<string, unknown>>;
@@ -205,7 +206,7 @@ describe("generateSessionReport", () => {
           },
         },
       ],
-      executionRuns: [{ status: "PASSED", stdout: "ok" }],
+      executionRuns: [{ id: "run-1", status: "PASSED", stdout: "ok" }],
     });
 
     const hintSummary = (report.reportJson as Record<string, unknown>).hintSummary as Record<string, unknown>;
@@ -313,7 +314,7 @@ describe("generateSessionReport", () => {
           },
         },
       ],
-      executionRuns: [{ status: "PASSED", stdout: "ok" }],
+      executionRuns: [{ id: "run-1", status: "PASSED", stdout: "ok" }],
       candidateStateSnapshots: [
         {
           id: "snap-1",
@@ -422,7 +423,28 @@ describe("generateSessionReport", () => {
           },
         },
       ],
-      executionRuns: [{ status: "PASSED", stdout: "ok" }],
+      executionRuns: [{ id: "run-1", status: "PASSED", stdout: "ok" }],
+      candidateStateSnapshots: [
+        {
+          id: "sig-6",
+          stage: "WRAP_UP",
+          snapshotJson: {
+            communication: "clear",
+            codeQuality: "correct",
+            complexityRigor: "strong",
+          },
+        },
+      ],
+      interviewerDecisionSnapshots: [
+        {
+          id: "dec-6",
+          stage: "WRAP_UP",
+          decisionJson: {
+            action: "move_to_wrap_up",
+            target: "summary",
+          },
+        },
+      ],
     });
 
     const rubricSummary = (report.reportJson as Record<string, unknown>).rubricSummary as Array<Record<string, unknown>>;
@@ -433,19 +455,29 @@ describe("generateSessionReport", () => {
     expect(correctness?.score).toBeGreaterThanOrEqual(4);
     expect(correctness?.maxScore).toBe(5);
     expect(Array.isArray(correctness?.evidence)).toBe(true);
+    expect(Array.isArray(correctness?.evidenceRefs)).toBe(true);
+    expect((correctness?.evidenceRefs as Array<Record<string, unknown>>).length).toBeGreaterThan(0);
     expect(typeof correctness?.basis).toBe("string");
 
     expect(complexity?.score).toBeGreaterThanOrEqual(4);
     expect(complexity?.maxScore).toBe(5);
     expect(Array.isArray(complexity?.evidence)).toBe(true);
+    expect(Array.isArray(complexity?.evidenceRefs)).toBe(true);
+    expect((complexity?.evidenceRefs as Array<Record<string, unknown>>).length).toBeGreaterThan(0);
     expect(typeof complexity?.basis).toBe("string");
 
     expect(communication?.score).toBeGreaterThanOrEqual(4);
     expect(communication?.maxScore).toBe(5);
     expect(Array.isArray(communication?.evidence)).toBe(true);
+    expect(Array.isArray(communication?.evidenceRefs)).toBe(true);
+    expect((communication?.evidenceRefs as Array<Record<string, unknown>>).length).toBeGreaterThan(0);
     expect(typeof communication?.basis).toBe("string");
   });
 });
+
+
+
+
 
 
 

@@ -471,6 +471,21 @@ Concrete work:
 - add stronger coachability measurement from hint conversion:
   - how quickly a nudge turns back into steady progress
 
+Phase 1 status:
+- added rubric evidence pinning for the most important visible dimensions:
+  - `Correctness`
+  - `Complexity`
+  - `Communication`
+- `report.ts` now emits `evidenceRefs` alongside rubric scores so a score can point back to:
+  - candidate state snapshots
+  - decision snapshots
+  - execution runs
+- `/report/[id]` now surfaces those evidence refs directly in the rubric scorecard instead of hiding the grounding in raw debug data
+- kept the first slice intentionally narrow; the next rubric pass should harden:
+  - level mapping
+  - stronger hire/borderline/no-hire interpretation
+  - coachability and independence calibration
+
 Success criteria:
 - reports are easier to trust and easier to compare across sessions
 - dimension scores have clearer, evidence-backed rationale
