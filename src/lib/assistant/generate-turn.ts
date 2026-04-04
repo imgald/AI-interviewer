@@ -13,10 +13,12 @@ import {
 import { buildFallbackReplyFromDecision, describeReplyStrategy } from "@/lib/assistant/reply_strategy";
 import { extractCandidateSignalsSmart, type CandidateSignalSnapshot } from "@/lib/assistant/signal_extractor";
 import { buildMemoryLedger } from "@/lib/assistant/memory_ledger";
+import { applyDecisionInvariants, buildDecisionJustification } from "@/lib/assistant/invariants";
 import { assessLatentCalibration } from "@/lib/assistant/latent_calibration";
 import { decideInterviewerIntent, type IntentDecision } from "@/lib/assistant/interviewer_intent";
 import { assessPassConditions, selectRelevantPassAssessment } from "@/lib/assistant/pass_conditions";
 import { applyDecisionPressure, assessInterviewPacing } from "@/lib/assistant/pacing";
+import { mapPersonaToPolicy } from "@/lib/assistant/policy-mapper";
 import { assessFlowState } from "@/lib/assistant/flow_state";
 import { estimateCandidateTrajectory, type TrajectoryEstimate } from "@/lib/assistant/trajectory_estimator";
 import {
@@ -27,6 +29,7 @@ import {
   type CodingInterviewStage,
 } from "@/lib/assistant/stages";
 import { estimateOpenAiTextCost, estimateTokens } from "@/lib/usage/cost";
+import { assessSessionBudget } from "@/lib/usage/budget";
 
 type TranscriptLike = {
   speaker: "USER" | "AI" | "SYSTEM";
@@ -1694,6 +1697,10 @@ function normalizeStage(stage: string | null | undefined): CodingInterviewStage 
 
 function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSignalSnapshot) {
   const currentStage = normalizeStage(input.currentStage);
+  const policyConfig = mapPersonaToPolicy({
+    personaSummary: input.personaSummary,
+    appliedPromptContext: input.appliedPromptContext,
+  });
   const policy = resolveCodingInterviewPolicy({
     currentStage,
     recentTranscripts: input.recentTranscripts,
@@ -1752,8 +1759,32 @@ function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSign
     trajectory: trajectory.candidateTrajectory,
     latestExecutionRun: input.latestExecutionRun,
   });
+  const budgetState = assessSessionBudget(input.recentEvents ?? []);
+  const invariantResult = applyDecisionInvariants({
+    decision: {
+      ...pressureAdjustedDecision,
+    },
+    currentStage,
+    signals,
+    memory: ledger,
+    trajectory,
+    policyConfig,
+    budgetState,
+    recentEvents: input.recentEvents,
+  });
+  const finalizedDecision = {
+    ...invariantResult.decision,
+    policyArchetype: policyConfig.archetype,
+    ...toDecisionJustificationFields(buildDecisionJustification({
+      decision: invariantResult.decision,
+      signals,
+      memory: ledger,
+      trajectory,
+      blockedByInvariant: invariantResult.blockedByInvariant,
+    })),
+  };
   return {
-    decision: pressureAdjustedDecision,
+    decision: finalizedDecision,
     intent,
     trajectory,
   };
@@ -1947,6 +1978,22 @@ function calculateReplyTokenOverlap(left: string, right: string) {
   }
 
   return overlap / Math.max(leftTokens.size, rightTokens.size);
+}
+
+function toDecisionJustificationFields(justification: {
+  whyNow: string;
+  whyThisAction: string;
+  whyNotAlternatives: string[];
+  supportingSignals: string[];
+  blockedByInvariant?: string;
+}) {
+  return {
+    justificationWhyNow: justification.whyNow,
+    justificationWhyThisAction: justification.whyThisAction,
+    justificationWhyNotAlternatives: justification.whyNotAlternatives,
+    supportingSignals: justification.supportingSignals,
+    blockedByInvariant: justification.blockedByInvariant,
+  };
 }
 
 

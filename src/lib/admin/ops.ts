@@ -95,6 +95,11 @@ export type SessionTimelineItem = {
   interventionValue?: string | null;
   bestIntervention?: string | null;
   expectedEvidenceGain?: string | null;
+  policyArchetype?: string | null;
+  blockedByInvariant?: string | null;
+  justificationWhyNow?: string | null;
+  justificationWhyThisAction?: string | null;
+  supportingSignals?: string[];
   autoCapturedEvidence?: string[];
   candidateCeiling?: string | null;
   easeOfExecution?: string | null;
@@ -442,6 +447,13 @@ function buildSessionTimeline(
           urgency: stringValue(decision.urgency),
           interruptionCost: stringValue(decision.interruptionCost),
           batchGroup: stringValue(decision.batchGroup),
+          policyArchetype: stringValue(decision.policyArchetype),
+          blockedByInvariant: stringValue(decision.blockedByInvariant),
+          justificationWhyNow: stringValue(decision.justificationWhyNow),
+          justificationWhyThisAction: stringValue(decision.justificationWhyThisAction),
+          supportingSignals: Array.isArray(decision.supportingSignals)
+            ? decision.supportingSignals.filter((item): item is string => typeof item === "string")
+            : [],
           evidenceFocus: stringValue(decision.specificIssue) ?? stringValue(decision.target),
           answeredTargets: [],
           collectedEvidence: [],
@@ -645,6 +657,8 @@ export function buildSessionEventDescription(eventType: string, payloadJson: unk
         ? `interruption=${stringValue(decision.interruptionCost)}`
         : null,
       stringValue(decision.batchGroup) ? `batch=${stringValue(decision.batchGroup)}` : null,
+      stringValue(decision.policyArchetype) ? `policy=${stringValue(decision.policyArchetype)}` : null,
+      stringValue(decision.blockedByInvariant) ? `blocked=${stringValue(decision.blockedByInvariant)}` : null,
     ]
       .filter(Boolean)
       .join(", ");

@@ -380,57 +380,140 @@ npm run build
 - Prisma generation on Windows can fail if `dev` or `worker` processes are locking the Prisma engine file.
 - After applying the 20260328020000_session_state_snapshots migration to the local Docker Postgres, session snapshot persistence now requires the app process to be restarted once if it had previously auto-disabled snapshot writes due to missing tables.
 
-## Next Recommended Work
+## Current Roadmap
 
-### Product and Backend
+The current roadmap intentionally avoids changing the core interviewer architecture. The main pipeline is already stable:
 
-- Push LLM-backed signal extraction deeper and persist candidate-state snapshots outside the event stream
-- Keep hardening snapshot-first state loading and reduce the remaining event-derived fallback paths in replay and audit views
-- Continue strengthening typed interviewer quality through richer decision actions and action-specific reply shaping
-- Harden real persona ingestion with better extraction quality, retry behavior, and source-specific heuristics
-- Expand the optional Docker sandbox into a more production-grade execution isolation model
-- Evolve report generation from v0 into a more rubric-driven evaluation pipeline
-- Push provider-first voice mode from periodic preview to true streaming STT/VAD
-- Extend the session budget guardrail beyond assistant turns so STT and other usage spikes can terminate sessions immediately
+`Perception -> Memory -> Intent -> Trajectory -> Decision -> Pacing -> Reply -> Critic -> Snapshot -> Report/Admin`
 
-### Queue and Observability
+The next phase is to make that pipeline behave more differently under policy/persona, sound more natural in voice, and produce harder, more trustworthy evaluation output.
 
-- Add admin filters by status, source type, and time range
-- Add explicit per-session timeline and stage journey view in admin
-- Surface per-session replay markers directly in admin
-- Add queue metrics and failure counts
-- Add retry controls or requeue actions in admin
+### Priority 1: Policy-Driven Behavior Adaptation
 
-### Testing
+Goal:
+- make `PolicyConfig` affect real interviewer behavior rather than only metadata and replay output
 
-- Add route and integration tests for interviewer profile creation, polling, job events, and admin APIs
-- Add worker-level integration tests for:
-  - retry-once success
-  - permanent failure
-  - event persistence completeness
-- Add Playwright flows for:
-  - generic session launch
-  - retry persona flow
-  - final fallback flow
+Concrete work:
+- wire policy archetypes into:
+  - `src/lib/assistant/decision_engine.ts`
+  - `src/lib/assistant/pacing.ts`
+  - `src/lib/assistant/hint_strategy.ts`
+- make archetypes such as `bar_raiser` and `collaborative` produce visibly different:
+  - pressure curves
+  - move-to-implementation bias
+  - close-topic aggression
+  - hint timing and maximum hint level
+- keep policy deterministic and observable through snapshots, `/admin`, and `/report`
 
-## Suggested Near-Term Milestones
+Success criteria:
+- the same transcript produces different but explainable interviewer behavior under different archetypes
+- invariants still override policy when necessary
 
-### Milestone 1
+### Priority 2: Voice Naturalness
 
-- Snapshot-first admin/report state loading
-- Hard session budget guardrail
-- More route and worker tests
+Goal:
+- close the gap between typed interviews and voice interviews
+
+Concrete work:
+- improve interruption handling and turn-taking in:
+  - `src/components/interview/interview-room-client.tsx`
+  - `src/lib/voice/turn-taking.ts`
+  - `src/lib/voice/browser-voice-adapter.ts`
+- keep spoken/live assistant text aligned with final transcript text
+- refine silence thresholds and filler-word handling
+- reduce awkward double-speak, premature cutoffs, and stale provider preview behavior
+
+Success criteria:
+- voice sessions feel closer to a real interviewer conversation
+- spoken AI, on-screen draft, and persisted transcript stay consistent
+
+### Priority 3: Rubric / Evaluation Hardening
+
+Goal:
+- move the report from strong qualitative debrief to a more formal rubric-driven evaluation system
+
+Concrete work:
+- strengthen rubric scoring in:
+  - `src/lib/evaluation/report.ts`
+- make `Correctness`, `Complexity`, `Communication`, `Debugging`, and `Independence` scores more explicit and better grounded
+- improve level-bar interpretation for:
+  - junior / mid / senior style performance
+- continue strengthening:
+  - evidence trace
+  - candidate DNA
+  - moments of truth
+  - coachability
+  - efficiency score
+
+Success criteria:
+- reports are easier to trust and easier to compare across sessions
+- dimension scores have clearer, evidence-backed rationale
+
+### Priority 4: Policy Tuning / Offline Evaluation
+
+Goal:
+- tune interviewer policy using stable golden scenarios instead of ad hoc rule edits
+
+Concrete work:
+- add more golden transcript scenarios around:
+  - timing correctness
+  - closure quality
+  - anti-repetition
+  - implementation handoff
+  - hint escalation
+- expand policy-oriented tests and eval scenarios for:
+  - no interruption when candidate is in strong coding flow
+  - clean closure when evidence is saturated
+  - no repeated probing of answered targets
+  - expected archetype differences
+- use session critic outputs to identify:
+  - over-interruption
+  - over-pressure
+  - weak closure
+  - redundant questioning
+
+Success criteria:
+- policy changes become safer and easier to validate
+- interviewer tuning is guided by reproducible scenario outcomes
+
+### Priority 5: UI Polish
+
+Goal:
+- make the existing system feel more professional without changing its core architecture
+
+Concrete work:
+- improve `/report/[id]` and `/admin` readability
+- keep stage-grouped replay, intent/trajectory visibility, and decision explainability easy to scan
+- surface the most important interviewer reasoning without overwhelming the user
+- polish room-level feedback so the candidate better understands:
+  - current stage
+  - AI source
+  - budget state
+  - voice state
+
+Success criteria:
+- the UI feels like a deliberate interview product rather than a debug console
+- deeper system reasoning remains visible for development and audit
+
+## Milestone Guidance
+
+### Milestone 1 Finale
+
+- finish policy-driven behavior adaptation
+- keep snapshot-first report/admin stable
+- maintain green build and test hygiene
 
 ### Milestone 2
 
-- Real persona ingestion pipeline
-- Stronger execution sandbox
-- Richer evaluation, replay, and session analytics signals
+- voice naturalness improvements
+- harder rubric / evaluation system
+- stronger policy tuning and offline evaluation loops
 
 ### Milestone 3
 
-- System design mode
-- Personalized study history and analytics
+- stronger sandbox isolation
+- more advanced interview modes such as system design
+- longer-term analytics and study history
 
 
 

@@ -18,6 +18,7 @@ import {
   type HintRequestTiming,
   type MomentumAtHint,
 } from "@/lib/assistant/hint_strategy";
+import type { PolicyArchetype } from "@/lib/assistant/policy-config";
 import {
   decideInterviewerIntent,
   type IntentDecision,
@@ -91,6 +92,12 @@ export type CandidateDecision = {
   worthAskingNow?: boolean;
   timing?: "ask_now" | "defer" | "skip";
   closureCandidate?: boolean;
+  policyArchetype?: PolicyArchetype;
+  justificationWhyNow?: string;
+  justificationWhyThisAction?: string;
+  justificationWhyNotAlternatives?: string[];
+  supportingSignals?: string[];
+  blockedByInvariant?: string;
   passConditions?: string[];
   missingPassConditions?: string[];
   passConditionTopic?: string;
@@ -119,6 +126,14 @@ export type CandidateDecision = {
   momentumAtHint?: MomentumAtHint;
   policyAction: CodingInterviewPolicyAction;
 };
+
+export interface DecisionJustification extends Record<string, unknown> {
+  whyNow: string;
+  whyThisAction: string;
+  whyNotAlternatives: string[];
+  supportingSignals: string[];
+  blockedByInvariant?: string;
+}
 
 type FailureSignal = {
   type: "timeout" | "index" | "null" | "assertion" | "wrong_answer" | "generic";

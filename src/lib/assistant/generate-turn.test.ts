@@ -711,6 +711,28 @@ describe("generateAssistantTurn", () => {
     expect(summary).toMatch(/Collected evidence so far/i);
     expect(summary).toMatch(/complexity|tradeoff|testing/i);
   });
+
+  it("attaches mapped policy config and decision justification to the final decision", async () => {
+    const result = await generateAssistantTurn({
+      mode: "CODING",
+      questionTitle: "Two Sum",
+      questionPrompt: "Return indices of two numbers that add up to target.",
+      personaSummary: "A senior interviewer with a direct, detail-oriented style.",
+      appliedPromptContext:
+        'Likely focus areas: ["tradeoffs","complexity"]. Communication style hints: ["direct","detail-oriented"].',
+      currentStage: "APPROACH_DISCUSSION",
+      recentTranscripts: [
+        {
+          speaker: "USER",
+          text: "We can use a hash map to store values and indices and return as soon as we find the complement.",
+        },
+      ],
+    });
+
+    expect(result.decision?.policyArchetype).toBe("bar_raiser");
+    expect(result.decision?.justificationWhyNow).toBeTruthy();
+    expect(Array.isArray(result.decision?.supportingSignals)).toBe(true);
+  });
 });
 
 function createSignalSnapshot(overrides?: Partial<Parameters<typeof buildSessionMemorySummary>[1]>) {

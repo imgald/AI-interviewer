@@ -101,6 +101,8 @@ describe("generateSessionReport", () => {
     expect(Array.isArray(stageSections)).toBe(true);
     expect(stageSections.some((item) => item.label === "Discussion")).toBe(true);
     expect(dimensions.some((dimension) => dimension.key === "independence")).toBe(true);
+    expect((reportJson.latestDecision as Record<string, unknown>).policyArchetype).toBe("collaborative");
+    expect((reportJson.latestDecision as Record<string, unknown>).blockedByInvariant).toBe("flow_preservation");
   });
 
   it("groups replay evidence around stage, signals, decisions, and code runs", () => {
@@ -442,4 +444,5 @@ describe("generateSessionReport", () => {
     expect(typeof communication?.basis).toBe("string");
   });
 });
+
 

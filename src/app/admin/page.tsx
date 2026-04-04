@@ -371,6 +371,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                       "unknown",
                                   )}
                                 />
+                                <MetricCard
+                                  label="Policy Archetype"
+                                  value={String(detail.sessionSummary.latestDecision.policyArchetype ?? "unknown")}
+                                />
+                                <MetricCard
+                                  label="Blocked By Invariant"
+                                  value={String(detail.sessionSummary.latestDecision.blockedByInvariant ?? "none")}
+                                />
                               </div>
                               <dl style={definitionListStyle}>
                                 {Object.entries(detail.sessionSummary.latestDecision).map(([key, value]) => (
@@ -398,6 +406,31 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                 <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
                                   <strong>Worth Reason</strong>
                                   <div style={panelStyle}>{String(detail.sessionSummary.latestCritic.worthReason)}</div>
+                                </div>
+                              ) : null}
+                              {detail.sessionSummary.latestDecision.justificationWhyNow ? (
+                                <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                                  <strong>Why Now</strong>
+                                  <div style={panelStyle}>{String(detail.sessionSummary.latestDecision.justificationWhyNow)}</div>
+                                </div>
+                              ) : null}
+                              {detail.sessionSummary.latestDecision.justificationWhyThisAction ? (
+                                <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                                  <strong>Why This Action</strong>
+                                  <div style={panelStyle}>{String(detail.sessionSummary.latestDecision.justificationWhyThisAction)}</div>
+                                </div>
+                              ) : null}
+                              {Array.isArray(detail.sessionSummary.latestDecision.supportingSignals) &&
+                              detail.sessionSummary.latestDecision.supportingSignals.length > 0 ? (
+                                <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                                  <strong>Supporting Signals</strong>
+                                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                                    {detail.sessionSummary.latestDecision.supportingSignals.map((item) => (
+                                      <span key={`admin-supporting-signal-${item}`} style={stagePillStyle}>
+                                        {String(item)}
+                                      </span>
+                                    ))}
+                                  </div>
                                 </div>
                               ) : null}
                               {Array.isArray(detail.sessionSummary.latestCritic?.autoCapturedEvidence) && detail.sessionSummary.latestCritic.autoCapturedEvidence.length > 0 ? (
@@ -813,6 +846,18 @@ const panelStyle = {
   borderRadius: 16,
   border: "1px solid var(--border)",
   background: "#fff",
+} as const;
+
+const stagePillStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "5px 10px",
+  borderRadius: 999,
+  border: "1px solid var(--border)",
+  background: "var(--surface-alt)",
+  color: "var(--muted)",
+  fontSize: 13,
+  fontWeight: 600,
 } as const;
 
 const timelineCardStyle = {

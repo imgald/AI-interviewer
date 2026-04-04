@@ -171,6 +171,22 @@ describe("buildUnifiedOpsFeed", () => {
     expect(description).toMatch(/edge_case/i);
   });
 
+  it("includes policy and invariant metadata in decision descriptions", () => {
+    const description = buildSessionEventDescription("DECISION_RECORDED", {
+      decision: {
+        action: "hold_and_listen",
+        target: "implementation",
+        urgency: "low",
+        interruptionCost: "high",
+        policyArchetype: "collaborative",
+        blockedByInvariant: "flow_preservation",
+      },
+    });
+
+    expect(description).toMatch(/policy=collaborative/i);
+    expect(description).toMatch(/blocked=flow_preservation/i);
+  });
+
   it("mentions provider fallback details for AI replies", () => {
     const description = buildSessionEventDescription("AI_SPOKE", {
       source: "fallback",
