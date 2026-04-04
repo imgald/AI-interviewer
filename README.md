@@ -112,6 +112,7 @@ This repo now has a working MVP-plus skeleton with:
 - Critic verdicts now also include `questionWorthAsking` and `worthReason`, so the system can distinguish between “bad wording” and “wrong timing”.
 - Critic verdicts are now written into session events and surfaced in `/admin` and `/report` replay so reviewer pressure, specificity, and repetition handling are inspectable.
 - Gemini/OpenAI now have a low-cost rewrite pass for weak turns before falling back to rule-based rewrites, which reduces generic follow-ups and repeated answered targets.
+- Streaming assistant turns now preserve spoken/live wording as the authoritative final transcript when a post-stream critic rewrite would materially change the interviewer intent, which keeps TTS/live draft output aligned with the persisted transcript.
 - decision_engine now avoids immediately repeating `testing`, `edge_case`, `complexity`, and `tradeoff` targets once the candidate has already supplied the relevant evidence, and instead moves the interview forward.
 - interviewer closure logic now explicitly models `move_to_wrap_up`, `close_topic`, and `end_interview`, so once evidence is saturated the system stops saying `Keep going` and closes the topic cleanly.
 - critic verdicts now track `evidenceAlreadySaturated` and `recommendedClosure`, so repeated wrap-up, summary, testing, and complexity loops can be converted into explicit closure turns instead of more probing.

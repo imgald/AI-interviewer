@@ -474,7 +474,7 @@ async function* streamWithOpenAI(
     decision,
     "openai",
   );
-  const final = finalizeReply(reviewed.reply);
+  const final = finalizeReply(selectAuthoritativeStreamReply(accumulated, reviewed.reply, reviewed.verdict));
   yield {
     final: {
         reply: final,
@@ -688,7 +688,7 @@ async function* streamWithGemini(
     decision,
     "gemini",
   );
-  const final = finalizeReply(reviewed.reply);
+  const final = finalizeReply(selectAuthoritativeStreamReply(accumulated, reviewed.reply, reviewed.verdict));
   yield {
     final: {
       reply: final,
@@ -1862,6 +1862,91 @@ function collapseReply(reply: string) {
   const normalized = reply.replace(/\s+/g, " ").trim();
   const sentences = normalized.match(/[^.!?]+[.!?]?/g)?.map((part) => part.trim()).filter(Boolean) ?? [];
   return sentences.slice(0, 2).join(" ").trim();
+}
+
+function selectAuthoritativeStreamReply(
+  streamedReply: string,
+  reviewedReply: string,
+  verdict: CriticVerdict,
+) {
+  const streamed = collapseReply(streamedReply);
+  const reviewed = collapseReply(reviewedReply);
+
+  if (!streamed) {
+    return reviewed;
+  }
+
+  if (!reviewed || streamed === reviewed) {
+    return reviewed || streamed;
+  }
+
+  if (!isSpecificStreamedReply(streamed)) {
+    return reviewed;
+  }
+
+  const overlap = calculateReplyTokenOverlap(streamed, reviewed);
+  const closureShift = !looksLikeClosureReply(streamed) && looksLikeClosureReply(reviewed);
+  const streamedAsksQuestion = streamed.includes("?");
+  const reviewedAsksQuestion = reviewed.includes("?");
+  const intentShift = streamedAsksQuestion !== reviewedAsksQuestion;
+  const aggressiveRewrite =
+    closureShift ||
+    verdict.reason === "evidence_saturated" ||
+    verdict.reason === "repeated_answered_target" ||
+    verdict.reason === "should_move_to_implementation";
+
+  if (aggressiveRewrite && overlap < 0.72) {
+    return streamed;
+  }
+
+  if (intentShift && overlap < 0.5) {
+    return streamed;
+  }
+
+  if (overlap < 0.3) {
+    return streamed;
+  }
+
+  return reviewed;
+}
+
+function isSpecificStreamedReply(reply: string) {
+  if (reply.split(/\s+/).filter(Boolean).length < 8) {
+    return false;
+  }
+
+  return !/\b(keep going|good start|sounds reasonable|that makes sense|nice work so far|continue)\b/i.test(reply);
+}
+
+function looksLikeClosureReply(reply: string) {
+  return /\b(wrap up|close this question|done here|done with this question|move on|we are done|we'll close this question)\b/i.test(
+    reply,
+  );
+}
+
+function calculateReplyTokenOverlap(left: string, right: string) {
+  const tokenize = (value: string) =>
+    new Set(
+      value
+        .toLowerCase()
+        .split(/[^a-z0-9_]+/i)
+        .filter((token) => token.length >= 4),
+    );
+  const leftTokens = tokenize(left);
+  const rightTokens = tokenize(right);
+
+  if (leftTokens.size === 0 || rightTokens.size === 0) {
+    return 0;
+  }
+
+  let overlap = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) {
+      overlap += 1;
+    }
+  }
+
+  return overlap / Math.max(leftTokens.size, rightTokens.size);
 }
 
 

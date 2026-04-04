@@ -571,6 +571,59 @@ describe("generateAssistantTurn", () => {
     expect(finalChunk?.reply).toMatch(/example|starting point|step by step/i);
   });
 
+  it("keeps the streamed question as the authoritative final reply when critic closure rewrites would materially change it", async () => {
+    process.env.GEMINI_API_KEY = "fake-key";
+    process.env.LLM_PROVIDER = "gemini";
+
+    const ssePayload = [
+      'event: message\ndata: {"candidates":[{"content":{"parts":[{"text":"Your latest run passed. Which high-risk boundary condition would you test next, and what exact output do you expect your code to produce for that case?"}]}}]}\n\n',
+    ].join("");
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode(ssePayload));
+          controller.close();
+        },
+      }),
+    } as Response) as typeof fetch;
+
+    const chunks: Array<{ textDelta?: string; final?: { reply: string; source: string } }> = [];
+    for await (const chunk of streamAssistantTurn({
+      mode: "CODING",
+      questionTitle: "Two Sum",
+      questionPrompt: "Return indices of two numbers that add up to target.",
+      currentStage: "TESTING_AND_COMPLEXITY",
+      recentTranscripts: [
+        {
+          speaker: "USER",
+          text: "Single-pass hash lookup gives optimal performance, with a clean invariant and predictable behavior, and I would harden the edge-case behavior before shipping.",
+        },
+      ],
+      recentEvents: [
+        {
+          eventType: "DECISION_RECORDED",
+          payloadJson: {
+            decision: {
+              target: "summary",
+              action: "move_to_wrap_up",
+            },
+          },
+        },
+      ],
+      latestExecutionRun: { status: "PASSED" },
+    })) {
+      chunks.push(chunk as { textDelta?: string; final?: { reply: string; source: string } });
+    }
+
+    const streamedText = chunks.filter((chunk) => chunk.textDelta).map((chunk) => chunk.textDelta).join("");
+    const finalChunk = chunks.find((chunk) => chunk.final)?.final;
+    expect(streamedText).toMatch(/high-risk boundary condition/i);
+    expect(finalChunk?.reply).toContain("Which high-risk boundary condition would you test next");
+    expect(finalChunk?.reply).not.toMatch(/close this question|final wrap-up|done here/i);
+  });
+
   it("includes unresolved issues and missing evidence in session memory summary", () => {
     const summary = buildSessionMemorySummary(
       [
