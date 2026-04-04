@@ -398,16 +398,25 @@ Concrete work:
   - `src/lib/assistant/decision_engine.ts`
   - `src/lib/assistant/pacing.ts`
   - `src/lib/assistant/hint_strategy.ts`
+- wrap policy behavior with an explicit invariant guard so policy cannot override:
+  - budget / clock closure constraints
+  - collapse / unblock safety behavior
+  - anti-repetition
+  - no-hint-after-completion rules
 - make archetypes such as `bar_raiser` and `collaborative` produce visibly different:
   - pressure curves
   - move-to-implementation bias
   - close-topic aggression
   - hint timing and maximum hint level
+- make `/admin` and `/report` distinguish:
+  - behavior chosen because of policy
+  - behavior overridden by invariant guard
 - keep policy deterministic and observable through snapshots, `/admin`, and `/report`
 
 Success criteria:
 - the same transcript produces different but explainable interviewer behavior under different archetypes
 - invariants still override policy when necessary
+- manually changing `PolicyConfig` produces a deterministic and inspectable behavior shift
 
 ### Priority 2: Voice Naturalness
 
@@ -419,13 +428,16 @@ Concrete work:
   - `src/components/interview/interview-room-client.tsx`
   - `src/lib/voice/turn-taking.ts`
   - `src/lib/voice/browser-voice-adapter.ts`
+- add authoritative stream locking so once a spoken turn starts, the core intent/question cannot drift underneath the transcript
 - keep spoken/live assistant text aligned with final transcript text
 - refine silence thresholds and filler-word handling
+- make silence handling dynamic based on whether the candidate is actively coding or paused
 - reduce awkward double-speak, premature cutoffs, and stale provider preview behavior
 
 Success criteria:
 - voice sessions feel closer to a real interviewer conversation
 - spoken AI, on-screen draft, and persisted transcript stay consistent
+- transcript text is denoised enough that `signal_extractor` is not polluted by filler-heavy turns
 
 ### Priority 3: Rubric / Evaluation Hardening
 
@@ -436,6 +448,10 @@ Concrete work:
 - strengthen rubric scoring in:
   - `src/lib/evaluation/report.ts`
 - make `Correctness`, `Complexity`, `Communication`, `Debugging`, and `Independence` scores more explicit and better grounded
+- pin each rubric score to concrete evidence:
+  - snapshot ids
+  - code run ids
+  - turn-level evidence points
 - improve level-bar interpretation for:
   - junior / mid / senior style performance
 - continue strengthening:
@@ -444,10 +460,13 @@ Concrete work:
   - moments of truth
   - coachability
   - efficiency score
+- add stronger coachability measurement from hint conversion:
+  - how quickly a nudge turns back into steady progress
 
 Success criteria:
 - reports are easier to trust and easier to compare across sessions
 - dimension scores have clearer, evidence-backed rationale
+- rubric output reads more like a judgment than a descriptive summary
 
 ### Priority 4: Policy Tuning / Offline Evaluation
 
@@ -466,6 +485,9 @@ Concrete work:
   - clean closure when evidence is saturated
   - no repeated probing of answered targets
   - expected archetype differences
+- add a policy-diff / strategy-lab workflow:
+  - run the same golden transcript through multiple archetypes
+  - compare intent timeline, pressure, timing, and closure behavior
 - use session critic outputs to identify:
   - over-interruption
   - over-pressure
@@ -475,6 +497,7 @@ Concrete work:
 Success criteria:
 - policy changes become safer and easier to validate
 - interviewer tuning is guided by reproducible scenario outcomes
+- archetype differences are observable without relying on subjective transcript reading
 
 ### Priority 5: UI Polish
 
@@ -483,6 +506,9 @@ Goal:
 
 Concrete work:
 - improve `/report/[id]` and `/admin` readability
+- move toward an executive-summary-first layout:
+  - recommendation / level / moments of truth first
+  - stage replay and raw transcript second
 - keep stage-grouped replay, intent/trajectory visibility, and decision explainability easy to scan
 - surface the most important interviewer reasoning without overwhelming the user
 - polish room-level feedback so the candidate better understands:
@@ -500,8 +526,14 @@ Success criteria:
 ### Milestone 1 Finale
 
 - finish policy-driven behavior adaptation
+- ensure `/admin` makes policy effect vs invariant override obvious
 - keep snapshot-first report/admin stable
 - maintain green build and test hygiene
+
+Milestone 1 finale checks:
+- strategy visibility: can we tell whether a turn came from policy bias or invariant override?
+- data consistency: does voice/transcript cleanup keep noise out of signal extraction?
+- deterministic behavior: does changing `PolicyConfig` create a reliable behavior shift?
 
 ### Milestone 2
 

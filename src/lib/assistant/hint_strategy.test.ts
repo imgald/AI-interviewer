@@ -6,6 +6,7 @@ import {
   resolveHintStrategy,
   resolveHintTier,
 } from "@/lib/assistant/hint_strategy";
+import { getPolicyPreset } from "@/lib/assistant/policy-config";
 import type { CandidateSignalSnapshot } from "@/lib/assistant/signal_extractor";
 
 const baseSignals: CandidateSignalSnapshot = {
@@ -86,4 +87,49 @@ describe("hint_strategy", () => {
     expect(result.momentumAtHint).toBe("stalled");
     expect(result.hintCost).toBeGreaterThan(5);
   });
+  it("caps hint strength under stricter archetypes", () => {
+    const strict = resolveHintStrategy({
+      currentStage: "DEBUGGING",
+      signals: baseSignals,
+      recentFailedRuns: 2,
+      hintStyle: "DEBUGGING_NUDGE",
+      hintLevel: "STRONG",
+      policyConfig: getPolicyPreset("bar_raiser"),
+    });
+    const educator = resolveHintStrategy({
+      currentStage: "DEBUGGING",
+      signals: baseSignals,
+      recentFailedRuns: 2,
+      hintStyle: "DEBUGGING_NUDGE",
+      hintLevel: "STRONG",
+      policyConfig: getPolicyPreset("educator"),
+    });
+
+    expect(strict.tier).toBe("L1_AREA");
+    expect(educator.tier).toBe("L3_SOLUTION");
+  });
+
+  it("makes rescue hints cheaper under collaborative-style rescue bias than bar raiser bias", () => {
+    const collaborativeCost = estimateNonLinearHintCost({
+      tier: "L1_AREA",
+      rescueMode: "conceptual_rescue",
+      hintInitiator: "system_rescue",
+      hintRequestTiming: "mid",
+      momentumAtHint: "stalled",
+      policyConfig: getPolicyPreset("collaborative"),
+    });
+    const barRaiserCost = estimateNonLinearHintCost({
+      tier: "L1_AREA",
+      rescueMode: "conceptual_rescue",
+      hintInitiator: "system_rescue",
+      hintRequestTiming: "mid",
+      momentumAtHint: "stalled",
+      policyConfig: getPolicyPreset("bar_raiser"),
+    });
+
+    expect(collaborativeCost).toBeLessThan(barRaiserCost);
+  });
 });
+
+
+

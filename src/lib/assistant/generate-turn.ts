@@ -1735,6 +1735,7 @@ function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSign
   const decision = makeCandidateDecision({
     currentStage,
     policy,
+    policyConfig,
     signals,
     recentEvents: input.recentEvents,
     latestExecutionRun: input.latestExecutionRun,
@@ -1748,6 +1749,7 @@ function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSign
     latestExecutionRun: input.latestExecutionRun,
     decision,
     recentTranscripts: input.recentTranscripts,
+    policyConfig,
   });
   const pressureAdjustedDecision = applyDecisionPressure({
     decision,
@@ -1758,6 +1760,7 @@ function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSign
     intent: intent.intent,
     trajectory: trajectory.candidateTrajectory,
     latestExecutionRun: input.latestExecutionRun,
+    policyConfig,
   });
   const budgetState = assessSessionBudget(input.recentEvents ?? []);
   const invariantResult = applyDecisionInvariants({

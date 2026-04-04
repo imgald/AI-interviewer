@@ -2,6 +2,7 @@ import type { CandidateDecision } from "@/lib/assistant/decision_engine";
 import { assessFlowState, type ContextReestablishmentCost } from "@/lib/assistant/flow_state";
 import type { InterviewerIntent } from "@/lib/assistant/interviewer_intent";
 import type { MemoryLedger } from "@/lib/assistant/memory_ledger";
+import type { PolicyConfig } from "@/lib/assistant/policy-config";
 import type { CandidateSignalSnapshot } from "@/lib/assistant/signal_extractor";
 import type { CodingInterviewStage } from "@/lib/assistant/stages";
 import type { TrajectoryEstimate } from "@/lib/assistant/trajectory_estimator";
@@ -47,8 +48,13 @@ export function assessInterviewPacing(input: {
   latestExecutionRun?: ExecutionRunLike | null;
   decision?: CandidateDecision;
   recentTranscripts?: Array<{ speaker: "USER" | "AI" | "SYSTEM"; text: string }>;
+  policyConfig?: PolicyConfig;
 }): PacingAssessment {
   const { currentStage, signals, ledger, latestExecutionRun, decision } = input;
+  const preferLetRun = input.policyConfig?.pacing.preferLetRun ?? 0.5;
+  const moveToImplementationBias = input.policyConfig?.pacing.moveToImplementationBias ?? 0.6;
+  const closeTopicAggression = input.policyConfig?.pacing.closeTopicAggression ?? 0.5;
+  const interruptionTolerance = input.policyConfig?.thresholds.interruptionCostMin ?? 2;
   const complexityEnough =
     ledger.answeredTargets.includes("complexity") ||
     ledger.answeredTargets.includes("tradeoff") ||
@@ -65,7 +71,11 @@ export function assessInterviewPacing(input: {
     signals.understanding === "clear" &&
     signals.progress !== "stuck" &&
     (signals.algorithmChoice === "reasonable" || signals.algorithmChoice === "strong") &&
-    (complexityEnough || signals.complexityRigor !== "missing" || testingEnough || signals.edgeCaseAwareness !== "missing");
+    (complexityEnough ||
+      signals.complexityRigor !== "missing" ||
+      testingEnough ||
+      signals.edgeCaseAwareness !== "missing" ||
+      moveToImplementationBias >= 0.8);
 
   const shouldStopTesting =
     testingEnough &&
@@ -200,7 +210,12 @@ export function assessInterviewPacing(input: {
     };
   }
 
-  if ((flowState.muteUntilPause || compareUrgency(urgency, interruptionCost) < 0) && canDefer) {
+  const shouldPreferFlow =
+    flowState.muteUntilPause ||
+    (preferLetRun >= 0.7 && interruptionCostScore(interruptionCost) >= interruptionTolerance) ||
+    compareUrgency(urgency, interruptionCost) < 0;
+
+  if (shouldPreferFlow && canDefer) {
     return {
       mustMoveToImplementation,
       complexityEnough,
@@ -218,6 +233,34 @@ export function assessInterviewPacing(input: {
       batchGroup,
       timingVerdict: "defer",
       evidenceFocus: batchGroup ?? decision.target,
+      codingBurst: flowState.codingBurst,
+      thinkingBurst: flowState.thinkingBurst,
+      muteUntilPause: flowState.muteUntilPause,
+      contextReestablishmentCost: flowState.contextReestablishmentCost,
+    };
+  }
+
+  if (
+    closeTopicAggression >= 0.85 &&
+    (shouldStopTesting || shouldStopComplexity) &&
+    ["testing", "edge_case", "complexity", "tradeoff"].includes(decision.target)
+  ) {
+    return {
+      mustMoveToImplementation,
+      complexityEnough,
+      testingEnough,
+      shouldStopTesting,
+      shouldStopComplexity,
+      questionWorthAsking: false,
+      worthReason: "This policy prefers to close saturated validation topics quickly once enough evidence is already on record.",
+      urgency,
+      canDefer,
+      interruptionCost,
+      evidenceImportance,
+      batchable,
+      batchGroup,
+      timingVerdict: "skip",
+      evidenceFocus: decision.target,
       codingBurst: flowState.codingBurst,
       thinkingBurst: flowState.thinkingBurst,
       muteUntilPause: flowState.muteUntilPause,
@@ -257,6 +300,7 @@ export function applyDecisionPressure(input: {
   intent?: InterviewerIntent;
   trajectory?: TrajectoryEstimate["candidateTrajectory"];
   latestExecutionRun?: ExecutionRunLike | null;
+  policyConfig?: PolicyConfig;
 }): CandidateDecision {
   const { decision, signals, ledger, pacing, latestExecutionRun } = input;
   const pressure = scheduleDecisionPressure({
@@ -268,6 +312,7 @@ export function applyDecisionPressure(input: {
     intent: input.intent,
     trajectory: input.trajectory,
     latestExecutionRun,
+    policyConfig: input.policyConfig,
   });
 
   return {
@@ -291,9 +336,10 @@ function scheduleDecisionPressure(input: {
   intent?: InterviewerIntent;
   trajectory?: TrajectoryEstimate["candidateTrajectory"];
   latestExecutionRun?: ExecutionRunLike | null;
+  policyConfig?: PolicyConfig;
 }): DecisionPressure {
   const { decision, signals, ledger, pacing, latestExecutionRun } = input;
-  let pressure: DecisionPressure = "neutral";
+  let pressure: DecisionPressure = resolvePolicyScheduledPressure(input.currentStage, input.policyConfig);
 
   if (
     decision.action === "hold_and_listen" ||
@@ -335,6 +381,22 @@ function scheduleDecisionPressure(input: {
   }
 
   if (pressure === "surgical" && ledger.recentlyProbedTargets.filter((target) => target === decision.target).length >= 2) {
+    pressure = "challenging";
+  }
+
+  if (input.policyConfig?.archetype === "collaborative" && pacing.canDefer) {
+    if (pressure === "surgical") {
+      pressure = "challenging";
+    } else if (pressure === "challenging") {
+      pressure = "neutral";
+    }
+  }
+
+  if (
+    input.policyConfig?.archetype === "bar_raiser" &&
+    pressure === "neutral" &&
+    ["probe_correctness", "probe_tradeoff", "ask_for_test_case", "ask_for_complexity"].includes(decision.action)
+  ) {
     pressure = "challenging";
   }
 
@@ -437,4 +499,32 @@ function classifyBatching(decision?: CandidateDecision) {
 function compareUrgency(urgency: DecisionUrgency, interruptionCost: InterruptionCost) {
   const score = { low: 1, medium: 2, high: 3 } as const;
   return score[urgency] - score[interruptionCost];
+}
+
+function interruptionCostScore(interruptionCost: InterruptionCost) {
+  const score = { low: 1, medium: 2, high: 3 } as const;
+  return score[interruptionCost];
+}
+
+function resolvePolicyScheduledPressure(
+  currentStage: CodingInterviewStage,
+  policyConfig?: PolicyConfig,
+): DecisionPressure {
+  if (!policyConfig) {
+    return "neutral";
+  }
+
+  switch (currentStage) {
+    case "PROBLEM_UNDERSTANDING":
+      return policyConfig.pressureSchedule.initial;
+    case "APPROACH_DISCUSSION":
+      return policyConfig.pressureSchedule.clarification;
+    case "IMPLEMENTATION":
+    case "DEBUGGING":
+      return policyConfig.pressureSchedule.coding;
+    case "TESTING_AND_COMPLEXITY":
+      return policyConfig.pressureSchedule.testing;
+    case "WRAP_UP":
+      return policyConfig.pressureSchedule.wrapUp;
+  }
 }

@@ -2,6 +2,7 @@
 import { assessInterviewPacing, applyDecisionPressure } from "@/lib/assistant/pacing";
 import type { CandidateDecision } from "@/lib/assistant/decision_engine";
 import { buildMemoryLedger } from "@/lib/assistant/memory_ledger";
+import { getPolicyPreset } from "@/lib/assistant/policy-config";
 import type { CandidateSignalSnapshot } from "@/lib/assistant/signal_extractor";
 
 const baseSignals: CandidateSignalSnapshot = {
@@ -164,5 +165,64 @@ describe("pacing", () => {
 
     expect(enriched.pressure).toBe("soft");
   });
+  it("lets collaborative mode defer while bar raiser keeps pressure higher on the same tradeoff probe", () => {
+    const signals = { ...baseSignals, readyToCode: false, algorithmChoice: "suboptimal" as const };
+    const ledger = buildMemoryLedger({
+      currentStage: "APPROACH_DISCUSSION",
+      signals,
+      recentEvents: [],
+      latestExecutionRun: null,
+    });
+    const decision: CandidateDecision = {
+      ...baseDecision,
+      action: "probe_tradeoff",
+      target: "tradeoff",
+    };
+
+    const collaborativePacing = assessInterviewPacing({
+      currentStage: "APPROACH_DISCUSSION",
+      signals,
+      ledger,
+      latestExecutionRun: null,
+      decision,
+      policyConfig: getPolicyPreset("collaborative"),
+    });
+    const collaborative = applyDecisionPressure({
+      decision,
+      signals,
+      ledger,
+      pacing: collaborativePacing,
+      currentStage: "APPROACH_DISCUSSION",
+      intent: "probe",
+      trajectory: "plateauing",
+      latestExecutionRun: null,
+      policyConfig: getPolicyPreset("collaborative"),
+    });
+
+    const barRaiserPacing = assessInterviewPacing({
+      currentStage: "APPROACH_DISCUSSION",
+      signals,
+      ledger,
+      latestExecutionRun: null,
+      decision,
+      policyConfig: getPolicyPreset("bar_raiser"),
+    });
+    const barRaiser = applyDecisionPressure({
+      decision,
+      signals,
+      ledger,
+      pacing: barRaiserPacing,
+      currentStage: "APPROACH_DISCUSSION",
+      intent: "probe",
+      trajectory: "plateauing",
+      latestExecutionRun: null,
+      policyConfig: getPolicyPreset("bar_raiser"),
+    });
+
+    expect(collaborative.pressure).not.toBe("surgical");
+    expect(barRaiser.pressure).toBe("surgical");
+  });
 });
+
+
 

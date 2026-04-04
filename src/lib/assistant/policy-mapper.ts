@@ -15,18 +15,18 @@ function inferArchetype(text: string): PolicyArchetype {
     return "collaborative";
   }
 
+  const hasAmazonLikeSignals =
+    /\b(amazon|bar raiser|direct|detail-oriented|tradeoff|tradeoffs|leadership|high bar|ownership)\b/.test(text) ||
+    /\blikely focus areas:.*(tradeoffs|complexity|correctness)\b/.test(text);
+  if (hasAmazonLikeSignals) {
+    return "bar_raiser";
+  }
+
   const hasGoogleLikeSignals =
     /\b(google|collaborative|thoughtful|clarity|structured reasoning|pair|guide|coaching)\b/.test(text) ||
     /\blikely focus areas:.*(clarity|communication)\b/.test(text);
   if (hasGoogleLikeSignals) {
     return "collaborative";
-  }
-
-  const hasAmazonLikeSignals =
-    /\b(amazon|bar raiser|direct|detail-oriented|tradeoff|leadership|high bar|ownership)\b/.test(text) ||
-    /\blikely focus areas:.*(tradeoffs|complexity|correctness)\b/.test(text);
-  if (hasAmazonLikeSignals) {
-    return "bar_raiser";
   }
 
   const hasEducatorSignals =

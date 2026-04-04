@@ -57,6 +57,8 @@ describe("generateSessionReport", () => {
               question: "Go ahead and implement it.",
               reason: "The direction is strong enough to code.",
               confidence: 0.84,
+              policyArchetype: "collaborative",
+              blockedByInvariant: "flow_preservation",
             },
           },
         },
@@ -444,5 +446,7 @@ describe("generateSessionReport", () => {
     expect(typeof communication?.basis).toBe("string");
   });
 });
+
+
 
 

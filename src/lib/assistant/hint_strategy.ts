@@ -1,4 +1,5 @@
-﻿import type { CodingInterviewHintLevel, CodingInterviewHintStyle } from "@/lib/assistant/policy";
+import type { CodingInterviewHintLevel, CodingInterviewHintStyle } from "@/lib/assistant/policy";
+import type { PolicyConfig } from "@/lib/assistant/policy-config";
 import type { CandidateSignalSnapshot } from "@/lib/assistant/signal_extractor";
 import type { CodingInterviewStage } from "@/lib/assistant/stages";
 import {
@@ -30,6 +31,7 @@ export function resolveHintStrategy(input: {
   recentEvents?: Array<{ eventType: string; payloadJson?: unknown }>;
   hintStyle?: CodingInterviewHintStyle;
   hintLevel?: CodingInterviewHintLevel;
+  policyConfig?: PolicyConfig;
 }) {
   const granularity = classifyHintGranularity(input.hintStyle, input.hintLevel);
   const rescueMode = resolveRescueMode({
@@ -39,11 +41,12 @@ export function resolveHintStrategy(input: {
     hintStyle: input.hintStyle,
   });
 
-  const tier = resolveHintTier({
+  const uncappedTier = resolveHintTier({
     hintStyle: input.hintStyle,
     hintLevel: input.hintLevel,
     granularity,
   });
+  const tier = capHintTier(uncappedTier, input.policyConfig?.hints.maxHintLevel ?? 3);
   const hintInitiator = resolveHintInitiator(input.recentEvents ?? []);
   const hintRequestTiming = resolveHintRequestTiming(input.currentStage);
   const momentumAtHint = resolveMomentumAtHint(input.signals);
@@ -61,6 +64,7 @@ export function resolveHintStrategy(input: {
       hintInitiator,
       hintRequestTiming,
       momentumAtHint,
+      policyConfig: input.policyConfig,
     }),
   } satisfies HintStrategy;
 }
@@ -132,6 +136,7 @@ export function estimateNonLinearHintCost(input: {
   hintInitiator?: HintInitiator;
   hintRequestTiming?: HintRequestTiming;
   momentumAtHint?: MomentumAtHint;
+  policyConfig?: PolicyConfig;
 }) {
   const base =
     input.tier === "L0_NUDGE"
@@ -165,6 +170,31 @@ export function estimateNonLinearHintCost(input: {
       : input.momentumAtHint === "fragile"
         ? 1.05
         : 0.9;
+  const rescueBiasMultiplier = Number(
+    (1 + (0.8 - (input.policyConfig?.hints.rescueModeBias ?? 0.8)) * 0.35).toFixed(2),
+  );
 
-  return Number((base * rescueMultiplier * initiatorMultiplier * timingMultiplier * momentumMultiplier).toFixed(2));
+  return Number(
+    (base * rescueMultiplier * initiatorMultiplier * timingMultiplier * momentumMultiplier * rescueBiasMultiplier).toFixed(
+      2,
+    ),
+  );
+}
+
+function capHintTier(tier: HintTier, maxHintLevel: number): HintTier {
+  const score = { L0_NUDGE: 0, L1_AREA: 1, L2_SPECIFIC: 2, L3_SOLUTION: 3 } as const;
+  const clampedMax = Math.max(0, Math.min(3, maxHintLevel));
+  if (score[tier] <= clampedMax) {
+    return tier;
+  }
+  if (clampedMax === 0) {
+    return "L0_NUDGE";
+  }
+  if (clampedMax === 1) {
+    return "L1_AREA";
+  }
+  if (clampedMax === 2) {
+    return "L2_SPECIFIC";
+  }
+  return "L3_SOLUTION";
 }

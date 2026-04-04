@@ -1,5 +1,6 @@
 ﻿import { describe, expect, it } from "vitest";
 import { makeCandidateDecision } from "@/lib/assistant/decision_engine";
+import { getPolicyPreset } from "@/lib/assistant/policy-config";
 import type { CandidateSignalSnapshot } from "@/lib/assistant/signal_extractor";
 
 const baseSignals: CandidateSignalSnapshot = {
@@ -165,6 +166,50 @@ describe("makeCandidateDecision", () => {
     expect(result.question).toMatch(/implement|coding|workable plan|go ahead/i);
   });
 
+  it("changes pre-code behavior under different archetypes for the same strong approach", () => {
+    const collaborative = makeCandidateDecision({
+      currentStage: "APPROACH_DISCUSSION",
+      policy: {
+        ...basePolicy,
+        currentStage: "APPROACH_DISCUSSION",
+        nextStage: "APPROACH_DISCUSSION",
+        recommendedAction: "PROBE_APPROACH",
+      },
+      policyConfig: getPolicyPreset("collaborative"),
+      signals: {
+        ...baseSignals,
+        readyToCode: true,
+        algorithmChoice: "strong",
+        complexityRigor: "missing",
+        testingDiscipline: "partial",
+        edgeCaseAwareness: "present",
+      },
+    });
+
+    const barRaiser = makeCandidateDecision({
+      currentStage: "APPROACH_DISCUSSION",
+      policy: {
+        ...basePolicy,
+        currentStage: "APPROACH_DISCUSSION",
+        nextStage: "APPROACH_DISCUSSION",
+        recommendedAction: "PROBE_APPROACH",
+      },
+      policyConfig: getPolicyPreset("bar_raiser"),
+      signals: {
+        ...baseSignals,
+        readyToCode: true,
+        algorithmChoice: "strong",
+        complexityRigor: "missing",
+        testingDiscipline: "partial",
+        edgeCaseAwareness: "present",
+      },
+    });
+
+    expect(collaborative.action).toBe("encourage_and_continue");
+    expect(collaborative.suggestedStage).toBe("IMPLEMENTATION");
+    expect(barRaiser.action).toBe("probe_tradeoff");
+    expect(barRaiser.target).toBe("tradeoff");
+  });
   it("prefers implementation over generic clarification when implementation evidence already exists", () => {
     const result = makeCandidateDecision({
       currentStage: "APPROACH_DISCUSSION",
@@ -852,6 +897,9 @@ describe("makeCandidateDecision", () => {
     expect(result.reason).toMatch(/confidence is low/i);
   });
 });
+
+
+
 
 
 

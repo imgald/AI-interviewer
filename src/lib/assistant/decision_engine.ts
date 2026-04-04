@@ -18,7 +18,7 @@ import {
   type HintRequestTiming,
   type MomentumAtHint,
 } from "@/lib/assistant/hint_strategy";
-import type { PolicyArchetype } from "@/lib/assistant/policy-config";
+import type { PolicyArchetype, PolicyConfig } from "@/lib/assistant/policy-config";
 import {
   decideInterviewerIntent,
   type IntentDecision,
@@ -146,6 +146,7 @@ type FailureSignal = {
 export function makeCandidateDecision(input: {
   currentStage: CodingInterviewStage;
   policy: CodingInterviewPolicy;
+  policyConfig?: PolicyConfig;
   signals: CandidateSignalSnapshot;
   recentEvents?: Array<{ eventType: string; payloadJson?: unknown }>;
   latestExecutionRun?: ExecutionRunLike | null;
@@ -153,6 +154,7 @@ export function makeCandidateDecision(input: {
   trajectory?: TrajectoryEstimate;
 }): CandidateDecision {
   const { currentStage, policy, signals, latestExecutionRun } = input;
+  const policyConfig = input.policyConfig;
   const ledger = buildMemoryLedger({
     currentStage,
     recentEvents: input.recentEvents ?? [],
@@ -173,6 +175,10 @@ export function makeCandidateDecision(input: {
   const tradeoffEvidence = findStructuredEvidence(signals, "complexity", /tradeoff/i);
   const hadRecentImplementationReadiness = detectRecentImplementationReadiness(input.recentEvents ?? []);
   const proofStyleAlreadyPressedTooMuch = ledger.recentProofStyleProbeCount >= 1;
+  const moveToImplementationBias = policyConfig?.pacing.moveToImplementationBias ?? 0.6;
+  const closeTopicAggression = policyConfig?.pacing.closeTopicAggression ?? 0.5;
+  const prefersGuidance = (policyConfig?.intentBias.guide ?? 0.5) >= (policyConfig?.intentBias.probe ?? 0.5);
+  const prefersProbe = (policyConfig?.intentBias.probe ?? 0.5) >= 0.85 || (policyConfig?.intentBias.pressure ?? 0.5) >= 0.8;
   const passAssessment = assessPassConditions({
     currentStage,
     signals,
@@ -184,9 +190,11 @@ export function makeCandidateDecision(input: {
     signals.understanding === "clear" &&
     (signals.algorithmChoice === "reasonable" || signals.algorithmChoice === "strong") &&
     signals.progress === "progressing" &&
-    signals.communication !== "unclear";
+    signals.communication !== "unclear" &&
+    (moveToImplementationBias >= 0.5 || passAssessment.implementation.complete);
   const enoughPreCodeEvidence =
-    shouldPreferImplementation && passAssessment.implementation.complete;
+    shouldPreferImplementation &&
+    (passAssessment.implementation.complete || moveToImplementationBias >= 0.8);
   const targetAlreadyAnswered = (...targets: string[]) =>
     targets.some((target) => ledger.answeredTargets.includes(target));
   const hasCollectedEvidence = (...evidence: string[]) =>
@@ -247,6 +255,30 @@ export function makeCandidateDecision(input: {
       passConditionTopic: relevantPassAssessment.topic,
     };
   };
+
+  if (
+    !latestExecutionRun &&
+    currentStage === "APPROACH_DISCUSSION" &&
+    shouldPreferImplementation &&
+    prefersProbe &&
+    !passAssessment.complexity.complete &&
+    !targetAlreadyAnswered("complexity", "tradeoff")
+  ) {
+    return attachIntentTrajectory({
+      action: "probe_tradeoff",
+      target: "tradeoff",
+      question:
+        "The main approach sounds viable. Before you code, justify the tradeoff once: why is this the right runtime, memory, or simplicity choice here?",
+      reason:
+        "This policy archetype prefers one sharper pre-code validation pass before implementation when the tradeoff story is still incomplete.",
+      confidence: 0.86,
+      targetCodeLine: "the tradeoff that justifies choosing this approach before coding starts",
+      specificIssue: "The algorithm direction is workable, but the tradeoff justification is still thin.",
+      expectedAnswer: "A concise runtime, memory, or simplicity tradeoff explanation tied to the constraints.",
+      suggestedStage: "APPROACH_DISCUSSION",
+      policyAction: "PROBE_APPROACH",
+    });
+  }
 
   if (input.intent && resolvedIntent.intent === "close") {
     return attachIntentTrajectory({
@@ -335,6 +367,28 @@ export function makeCandidateDecision(input: {
   }
 
   if (policy.shouldServeHint) {
+    const explicitHintRequest =
+      policy.escalationReason === "explicit_hint_request" || policy.escalationReason === "candidate_asked_for_help";
+    const shouldDelayHint =
+      !explicitHintRequest &&
+      (policyConfig?.hints.delayFactor ?? 1) > 1 &&
+      repeatedFailures < Math.ceil((policyConfig?.hints.delayFactor ?? 1) + 0.5) &&
+      signals.progress !== "stuck";
+
+    if (shouldDelayHint) {
+      return attachIntentTrajectory({
+        action: "hold_and_listen",
+        target: currentStage === "IMPLEMENTATION" ? "implementation" : "reasoning",
+        question:
+          "Keep going for another beat. I want to see whether you can recover this step on your own before I intervene.",
+        reason:
+          "This policy prefers delaying hints slightly unless the candidate explicitly requests help or the session shows stronger evidence of being stuck.",
+        confidence: 0.8,
+        suggestedStage: currentStage,
+        policyAction: policy.recommendedAction,
+      });
+    }
+
     const hintStrategy = resolveHintStrategy({
       currentStage,
       signals,
@@ -342,6 +396,7 @@ export function makeCandidateDecision(input: {
       hintStyle: policy.hintStyle,
       hintLevel: policy.hintLevel,
       recentEvents: input.recentEvents,
+      policyConfig,
     });
     return attachIntentTrajectory({
       action: "give_hint",
@@ -403,7 +458,9 @@ export function makeCandidateDecision(input: {
       action: "encourage_and_continue",
       target: "implementation",
       question:
-        "You've already specified the algorithm, complexity, and the main validation cases clearly enough. Go ahead and implement it now, and we can revisit correctness details after the code is written.",
+        prefersGuidance
+          ? "You've already specified the algorithm, complexity, and the main validation cases clearly enough. Go ahead and implement it now, and we can revisit correctness details after the code is written."
+          : "The core approach is viable enough to code now. Implement it, and then we will pressure-test the tradeoffs and correctness on the concrete code.",
       reason:
         "The candidate has already provided enough pre-code evidence, so the interviewer should stop front-loading more probing and move into implementation.",
       confidence: 0.9,
@@ -421,7 +478,9 @@ export function makeCandidateDecision(input: {
         action: "move_to_wrap_up",
         target: "summary",
         question:
-          "Good. The implementation, validation, and performance story are all covered well enough. Give me one concise final wrap-up and then we will close this question.",
+          closeTopicAggression >= 0.8
+            ? "Good. The implementation, validation, and performance story are all covered well enough. Give me one concise final wrap-up and then we will close this question quickly."
+            : "Good. The implementation, validation, and performance story are all covered well enough. Give me one concise final wrap-up and then we will close this question.",
         reason:
           "The testing and complexity pass conditions are already satisfied, so the highest-value next move is to wrap up cleanly.",
         confidence: 0.91,
