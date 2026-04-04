@@ -434,6 +434,14 @@ Concrete work:
 - make silence handling dynamic based on whether the candidate is actively coding or paused
 - reduce awkward double-speak, premature cutoffs, and stale provider preview behavior
 
+Phase 1 status:
+- implemented active-coding-aware voice delays so speech turns are given more room during `IMPLEMENTATION` and `DEBUGGING`
+- implemented flow-aware voice timing so `discussion`, `coding`, `debugging`, and `wrap_up` now tolerate pauses differently
+- added conservative filler/noise cleanup in `src/lib/voice/transcript-normalization.ts`
+- added low-signal utterance filtering so filler-only fragments like `um yeah so` do not get committed as candidate turns
+- added client-side authoritative assistant reply handling in `src/lib/voice/assistant-stream.ts` so the remaining TTS tail follows the final authoritative transcript instead of a stale streamed draft
+- kept the first slice intentionally narrow and deterministic; deeper voice work should extend these rules instead of replacing them
+
 Success criteria:
 - voice sessions feel closer to a real interviewer conversation
 - spoken AI, on-screen draft, and persisted transcript stay consistent

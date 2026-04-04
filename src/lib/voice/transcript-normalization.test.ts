@@ -29,4 +29,18 @@ describe("transcript normalization", () => {
 
     expect(merged).toBe("I would use a hash map to count the frequency first");
   });
+
+  it("strips common filler words without disturbing technical content", () => {
+    const normalized = normalizeTranscriptText(
+      "um I would use a hash map, uh then talk about time complexity, you know",
+    );
+
+    expect(normalized).toBe("I would use a hash map, then talk about time complexity");
+  });
+
+  it("keeps meaningful uses of words like like", () => {
+    const normalized = normalizeTranscriptText("I like dynamic programming for this because it fits the state.");
+
+    expect(normalized).toContain("I like dynamic programming");
+  });
 });

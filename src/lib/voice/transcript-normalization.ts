@@ -68,7 +68,7 @@ const TECHNICAL_TERM_REPLACEMENTS: Array<[RegExp, string]> = [
 ];
 
 export function normalizeTranscriptText(text: string) {
-  let normalized = text.trim().replace(/\s+/g, " ");
+  let normalized = stripFillerNoise(text).trim().replace(/\s+/g, " ");
 
   for (const [pattern, replacement] of TECHNICAL_TERM_REPLACEMENTS) {
     normalized = normalized.replace(pattern, replacement);
@@ -117,4 +117,17 @@ export function mergeTranscriptFragments(base: string, incoming: string) {
 
 function normalizeSpacing(text: string) {
   return text.trim().replace(/\s+/g, " ");
+}
+
+function stripFillerNoise(text: string) {
+  let normalized = text
+    .replace(/\b(um+|uh+|ah+|er+|mm+)\b[,\s]*/gi, " ")
+    .replace(/(^|[\s,])you know(?=[,\s])/gi, "$1")
+    .replace(/(^|[\s,])like(?=,)/gi, "$1");
+
+  normalized = normalized.replace(/\s+([,.!?;:])/g, "$1");
+  normalized = normalized.replace(/([,.!?;:]){2,}/g, "$1");
+  normalized = normalized.replace(/[,;:]\s*$/g, "");
+  normalized = normalized.replace(/\s+/g, " ");
+  return normalized;
 }

@@ -9,9 +9,27 @@ const INTERRUPTION_PHRASES = [
   "hold up",
 ];
 
+const LOW_SIGNAL_TOKENS = new Set([
+  "um",
+  "uh",
+  "ah",
+  "er",
+  "mm",
+  "hmm",
+  "yeah",
+  "yep",
+  "ok",
+  "okay",
+  "right",
+  "so",
+  "well",
+]);
+
 type TurnTimingInput = {
   text: string;
   interruptedRecently?: boolean;
+  activeCoding?: boolean;
+  flowMode?: "discussion" | "coding" | "debugging" | "wrap_up";
 };
 
 export function getAutoSubmitDelayMs(input: TurnTimingInput) {
@@ -25,23 +43,17 @@ export function getAutoSubmitDelayMs(input: TurnTimingInput) {
   const hasConnectorEnding = /\b(and|so|then|because|but|or|with|for|to)$/.test(normalized);
   const hasComplexityTalk = /\btime complexity|space complexity|o\(/.test(normalized);
 
-  if (endsSentence && wordCount >= 14) {
-    return input.interruptedRecently ? 1200 : 950;
-  }
-
-  if (wordCount <= 3) {
-    return input.interruptedRecently ? 2500 : 2100;
-  }
-
-  if (wordCount <= 8) {
-    return input.interruptedRecently ? 2100 : 1750;
-  }
-
   if (hasConnectorEnding || hasComplexityTalk) {
-    return input.interruptedRecently ? 2000 : 1600;
+    const baseDelay = input.interruptedRecently ? 2000 : 1600;
+    return applyVoiceFlowBias(applyCodingDelayBias(baseDelay, input.activeCoding), input.flowMode);
   }
 
-  return input.interruptedRecently ? 1750 : 1400;
+  const baseDelay = resolveAutoSubmitBaseDelay({
+    wordCount,
+    endsSentence,
+    interruptedRecently: input.interruptedRecently,
+  });
+  return applyVoiceFlowBias(applyCodingDelayBias(baseDelay, input.activeCoding), input.flowMode);
 }
 
 export function getFinalChunkCommitDelayMs(input: TurnTimingInput) {
@@ -54,18 +66,38 @@ export function getFinalChunkCommitDelayMs(input: TurnTimingInput) {
   const hasConnectorEnding = /\b(and|so|then|because|but|or|with|for|to)$/.test(normalized);
 
   if (/[.!?]$/.test(normalized)) {
-    return wordCount >= 10 ? 320 : 520;
+    return applyVoiceFlowBias(
+      applyCodingDelayBias(wordCount >= 10 ? 320 : 520, input.activeCoding, 220, 1600),
+      input.flowMode,
+      240,
+      1600,
+    );
   }
 
   if (wordCount <= 3) {
-    return input.interruptedRecently ? 1500 : 1200;
+    return applyVoiceFlowBias(
+      applyCodingDelayBias(input.interruptedRecently ? 1500 : 1200, input.activeCoding, 220, 1600),
+      input.flowMode,
+      240,
+      1600,
+    );
   }
 
   if (hasConnectorEnding) {
-    return input.interruptedRecently ? 1200 : 900;
+    return applyVoiceFlowBias(
+      applyCodingDelayBias(input.interruptedRecently ? 1200 : 900, input.activeCoding, 220, 1600),
+      input.flowMode,
+      240,
+      1600,
+    );
   }
 
-  return input.interruptedRecently ? 950 : 720;
+  return applyVoiceFlowBias(
+    applyCodingDelayBias(input.interruptedRecently ? 950 : 720, input.activeCoding, 220, 1600),
+    input.flowMode,
+    240,
+    1600,
+  );
 }
 
 export function shouldIgnoreInterruptedUtterance(text: string, interruptedRecently = false) {
@@ -81,10 +113,73 @@ export function shouldIgnoreInterruptedUtterance(text: string, interruptedRecent
   return INTERRUPTION_PHRASES.some((phrase) => normalized === phrase || normalized.startsWith(`${phrase} `));
 }
 
+export function isLowSignalUtterance(text: string) {
+  const normalized = normalizeUtterance(text).replace(/[,.!?;:]/g, " ").trim();
+  if (!normalized) {
+    return true;
+  }
+
+  const tokens = normalized.split(/\s+/).filter(Boolean);
+  if (tokens.length > 4) {
+    return false;
+  }
+
+  return tokens.every((token) => LOW_SIGNAL_TOKENS.has(token));
+}
+
 export function normalizeUtterance(text: string) {
   return text.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function countWords(text: string) {
   return text.split(/\s+/).filter(Boolean).length;
+}
+
+function resolveAutoSubmitBaseDelay(input: {
+  wordCount: number;
+  endsSentence: boolean;
+  interruptedRecently?: boolean;
+}) {
+  if (input.endsSentence && input.wordCount >= 14) {
+    return input.interruptedRecently ? 1200 : 950;
+  }
+
+  if (input.wordCount <= 3) {
+    return input.interruptedRecently ? 2500 : 2100;
+  }
+
+  if (input.wordCount <= 8) {
+    return input.interruptedRecently ? 2100 : 1750;
+  }
+
+  return input.interruptedRecently ? 1750 : 1400;
+}
+
+function applyCodingDelayBias(baseDelay: number, activeCoding = false, increment = 350, maxDelay = 2800) {
+  if (!activeCoding) {
+    return baseDelay;
+  }
+
+  return Math.min(baseDelay + increment, maxDelay);
+}
+
+function applyVoiceFlowBias(
+  baseDelay: number,
+  flowMode: TurnTimingInput["flowMode"],
+  increment = 320,
+  maxDelay = 2800,
+) {
+  if (flowMode === "coding") {
+    return Math.min(baseDelay + increment, maxDelay);
+  }
+
+  if (flowMode === "debugging") {
+    return Math.min(baseDelay + Math.round(increment * 0.65), maxDelay);
+  }
+
+  if (flowMode === "wrap_up") {
+    return Math.max(baseDelay - 120, 260);
+  }
+
+  return baseDelay;
 }

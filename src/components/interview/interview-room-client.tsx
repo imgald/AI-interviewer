@@ -23,8 +23,10 @@ import { mergeTranscriptFragments, normalizeTranscriptText } from "@/lib/voice/t
 import {
   getAutoSubmitDelayMs,
   getFinalChunkCommitDelayMs,
+  isLowSignalUtterance,
   shouldIgnoreInterruptedUtterance,
 } from "@/lib/voice/turn-taking";
+import { resolveAssistantSpeechRemainder } from "@/lib/voice/assistant-stream";
 import type { BrowserVoiceState, InterviewVoiceAdapter, VoiceAvailability } from "@/lib/voice/types";
 import { describeVoiceState } from "@/lib/voice/voice-status";
 
@@ -187,6 +189,7 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
   const pendingSpeechBufferRef = useRef("");
   const providerPreviewTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const providerSpeechActiveRef = useRef(false);
+  const lastEditorActivityAtRef = useRef<number>(0);
   const supportsProviderPreview = dedicatedSttProvider === "openai-stt";
 
   useEffect(() => {
@@ -489,6 +492,35 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
     return typeof payload.source === "string" ? payload.source : null;
   }, [events]);
 
+  function markEditorActivity() {
+    lastEditorActivityAtRef.current = Date.now();
+  }
+
+  function isActivelyCoding() {
+    const activeCodingStage = currentStage === "IMPLEMENTATION" || currentStage === "DEBUGGING";
+    if (!activeCodingStage) {
+      return false;
+    }
+
+    return Date.now() - lastEditorActivityAtRef.current < 4500;
+  }
+
+  function currentVoiceFlowMode(): "discussion" | "coding" | "debugging" | "wrap_up" {
+    if (currentStage === "IMPLEMENTATION") {
+      return "coding";
+    }
+
+    if (currentStage === "DEBUGGING") {
+      return "debugging";
+    }
+
+    if (currentStage === "WRAP_UP" || currentStage === "TESTING_AND_COMPLEXITY") {
+      return "wrap_up";
+    }
+
+    return "discussion";
+  }
+
   function runAction(action: () => Promise<void>) {
     setActionError(null);
     startTransition(() => {
@@ -641,9 +673,14 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
     }
 
     const candidateText = normalizeTranscriptText(pendingSpeechBufferRef.current || draftTranscript);
+    if (isLowSignalUtterance(candidateText)) {
+      return;
+    }
     const delayMs = getAutoSubmitDelayMs({
       text: candidateText || "spoken candidate answer",
       interruptedRecently: interruptedRecently(),
+      activeCoding: isActivelyCoding(),
+      flowMode: currentVoiceFlowMode(),
     });
 
     if (delayMs === null) {
@@ -665,9 +702,15 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
       return;
     }
 
+    if (isLowSignalUtterance(text)) {
+      return;
+    }
+
     const delayMs = getAutoSubmitDelayMs({
       text,
       interruptedRecently: interruptedRecently(),
+      activeCoding: isActivelyCoding(),
+      flowMode: currentVoiceFlowMode(),
     });
 
     if (delayMs === null) {
@@ -702,6 +745,8 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
     const delayMs = getFinalChunkCommitDelayMs({
       text: mergedFinalText,
       interruptedRecently: interruptedRecently(),
+      activeCoding: isActivelyCoding(),
+      flowMode: currentVoiceFlowMode(),
     });
 
     if (delayMs === null) {
@@ -941,8 +986,14 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
               );
             }
 
-            if (accumulated.length > spokenIndex) {
-              await voiceAdapterRef.current?.speakText(accumulated.slice(spokenIndex).trim());
+            const remainingAuthoritativeSpeech = resolveAssistantSpeechRemainder({
+              streamedDraft: accumulated,
+              finalTranscriptText: finalTranscript?.text,
+              spokenIndex,
+            });
+
+            if (remainingAuthoritativeSpeech) {
+              await voiceAdapterRef.current?.speakText(remainingAuthoritativeSpeech);
             }
           }
         }
@@ -995,10 +1046,15 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
       return;
     }
 
+    if (speechDrivenSource && isLowSignalUtterance(normalizedText)) {
+      setRoomNotice("Heard a short filler phrase, so the room is waiting for the rest of your answer.");
+      return;
+    }
+
     if (
       speechDrivenSource &&
       options?.source !== "provider_vad" &&
-      shouldDelaySpeechDrivenCommit(normalizedText)
+      shouldDelaySpeechDrivenCommit(normalizedText, currentVoiceFlowMode())
     ) {
       pendingSpeechBufferRef.current = mergeTranscriptFragments(pendingSpeechBufferRef.current, normalizedText);
       setDraftTranscript(pendingSpeechBufferRef.current);
@@ -1677,7 +1733,10 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
                 language={monacoLanguage}
                 theme="vs-dark"
                 value={editorCode}
-                onChange={(value) => setEditorCode(value ?? "")}
+                onChange={(value) => {
+                  markEditorActivity();
+                  setEditorCode(value ?? "");
+                }}
                 options={{
                   minimap: { enabled: false },
                   fontSize: 14,
@@ -2155,7 +2214,10 @@ function describeDedicatedSttError(payload: unknown) {
   return `Dedicated STT failed and the room fell back to browser transcription: ${message}`;
 }
 
-function shouldDelaySpeechDrivenCommit(text: string) {
+function shouldDelaySpeechDrivenCommit(
+  text: string,
+  flowMode: "discussion" | "coding" | "debugging" | "wrap_up" = "discussion",
+) {
   const normalized = text.trim();
   if (!normalized) {
     return false;
@@ -2165,11 +2227,19 @@ function shouldDelaySpeechDrivenCommit(text: string) {
   const looksIncomplete = /\b(and|so|then|because|but|or|with|for|to)$/i.test(normalized);
   const hasTerminalPunctuation = /[.!?]$/.test(normalized);
 
+  if (flowMode === "wrap_up") {
+    return !hasTerminalPunctuation && wordCount <= 2;
+  }
+
   if (wordCount <= 4) {
     return true;
   }
 
   if (looksIncomplete && !hasTerminalPunctuation) {
+    return true;
+  }
+
+  if ((flowMode === "coding" || flowMode === "debugging") && wordCount <= 6 && !hasTerminalPunctuation) {
     return true;
   }
 

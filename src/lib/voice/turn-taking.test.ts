@@ -2,6 +2,7 @@
 import {
   getAutoSubmitDelayMs,
   getFinalChunkCommitDelayMs,
+  isLowSignalUtterance,
   normalizeUtterance,
   shouldIgnoreInterruptedUtterance,
 } from "@/lib/voice/turn-taking";
@@ -30,6 +31,72 @@ describe("voice turn-taking policy", () => {
 
   it("normalizes whitespace and casing consistently", () => {
     expect(normalizeUtterance("  Hold   On  ")).toBe("hold on");
+  });
+
+  it("recognizes filler-heavy low-signal utterances", () => {
+    expect(isLowSignalUtterance("um yeah so")).toBe(true);
+    expect(isLowSignalUtterance("okay right")).toBe(true);
+    expect(isLowSignalUtterance("the bug is the pointer update")).toBe(false);
+  });
+
+  it("waits longer before auto-submitting while the candidate is actively coding", () => {
+    const idleDelay = getAutoSubmitDelayMs({
+      text: "I would sort the array first, then sweep once to merge overlapping intervals.",
+      activeCoding: false,
+    });
+    const codingDelay = getAutoSubmitDelayMs({
+      text: "I would sort the array first, then sweep once to merge overlapping intervals.",
+      activeCoding: true,
+    });
+
+    expect(idleDelay).not.toBeNull();
+    expect(codingDelay).not.toBeNull();
+    expect(codingDelay!).toBeGreaterThan(idleDelay!);
+  });
+
+  it("waits longer before committing a final transcript chunk while the candidate is coding", () => {
+    const idleDelay = getFinalChunkCommitDelayMs({
+      text: "I think the bug is the pointer update",
+      activeCoding: false,
+    });
+    const codingDelay = getFinalChunkCommitDelayMs({
+      text: "I think the bug is the pointer update",
+      activeCoding: true,
+    });
+
+    expect(idleDelay).not.toBeNull();
+    expect(codingDelay).not.toBeNull();
+    expect(codingDelay!).toBeGreaterThan(idleDelay!);
+  });
+
+  it("is more patient in coding flow than in wrap-up flow", () => {
+    const codingDelay = getAutoSubmitDelayMs({
+      text: "the bug is probably in the pointer update",
+      flowMode: "coding",
+    });
+    const wrapUpDelay = getAutoSubmitDelayMs({
+      text: "the bug is probably in the pointer update",
+      flowMode: "wrap_up",
+    });
+
+    expect(codingDelay).not.toBeNull();
+    expect(wrapUpDelay).not.toBeNull();
+    expect(codingDelay!).toBeGreaterThan(wrapUpDelay!);
+  });
+
+  it("keeps debugging flow slightly more patient than a normal discussion turn", () => {
+    const discussionDelay = getFinalChunkCommitDelayMs({
+      text: "I think the bug is the pointer update",
+      flowMode: "discussion",
+    });
+    const debuggingDelay = getFinalChunkCommitDelayMs({
+      text: "I think the bug is the pointer update",
+      flowMode: "debugging",
+    });
+
+    expect(discussionDelay).not.toBeNull();
+    expect(debuggingDelay).not.toBeNull();
+    expect(debuggingDelay!).toBeGreaterThan(discussionDelay!);
   });
 });
 
