@@ -100,11 +100,14 @@ export type SessionTimelineItem = {
   bestIntervention?: string | null;
   expectedEvidenceGain?: string | null;
   policyArchetype?: string | null;
+  policyMode?: string | null;
+  policyAdaptationReason?: string | null;
   blockedByInvariant?: string | null;
   decisionPathway?: string[];
   justificationWhyNow?: string | null;
   justificationWhyThisAction?: string | null;
   supportingSignals?: string[];
+  competingIntents?: Array<{ intent?: string; reason?: string; score?: number }>;
   autoCapturedEvidence?: string[];
   candidateCeiling?: string | null;
   easeOfExecution?: string | null;
@@ -495,6 +498,8 @@ function buildSessionTimeline(
           interruptionCost: stringValue(decision.interruptionCost),
           batchGroup: stringValue(decision.batchGroup),
           policyArchetype: stringValue(decision.policyArchetype),
+          policyMode: stringValue(decision.policyMode),
+          policyAdaptationReason: stringValue(decision.policyAdaptationReason),
           blockedByInvariant: stringValue(decision.blockedByInvariant),
           decisionPathway: Array.isArray(decision.decisionPathway)
             ? decision.decisionPathway.filter((item): item is string => typeof item === "string")
@@ -523,6 +528,15 @@ function buildSessionTimeline(
           intent: stringValue(intent.intent),
           intentTargetSignal: stringValue(intent.targetSignal),
           expectedOutcome: stringValue(intent.expectedOutcome),
+          competingIntents: Array.isArray(intent.competingIntents)
+            ? intent.competingIntents
+                .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+                .map((item) => ({
+                  intent: stringValue(item.intent) ?? undefined,
+                  reason: stringValue(item.reason) ?? undefined,
+                  score: typeof item.score === "number" ? item.score : undefined,
+                }))
+            : [],
           payload,
         };
       }
@@ -718,6 +732,7 @@ export function buildSessionEventDescription(eventType: string, payloadJson: unk
         : null,
       stringValue(decision.batchGroup) ? `batch=${stringValue(decision.batchGroup)}` : null,
       stringValue(decision.policyArchetype) ? `policy=${stringValue(decision.policyArchetype)}` : null,
+      stringValue(decision.policyMode) ? `mode=${stringValue(decision.policyMode)}` : null,
       stringValue(decision.blockedByInvariant) ? `blocked=${stringValue(decision.blockedByInvariant)}` : null,
     ]
       .filter(Boolean)
@@ -727,7 +742,13 @@ export function buildSessionEventDescription(eventType: string, payloadJson: unk
 
   if (eventType === "INTENT_SNAPSHOT_RECORDED") {
     const intent = asRecord(payload.intent);
-    return `Interviewer intent: ${stringOrFallback(intent.intent, "unknown intent")} targeting ${stringOrFallback(intent.targetSignal, "general signal")} to ${stringOrFallback(intent.expectedOutcome, "collect signal")}.`;
+    const competing = Array.isArray(intent.competingIntents)
+      ? intent.competingIntents
+          .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+          .map((item) => stringValue(item.intent))
+          .filter((item): item is string => typeof item === "string")
+      : [];
+    return `Interviewer intent: ${stringOrFallback(intent.intent, "unknown intent")} targeting ${stringOrFallback(intent.targetSignal, "general signal")} to ${stringOrFallback(intent.expectedOutcome, "collect signal")}${competing.length > 0 ? `. Alternatives considered: ${competing.join(", ")}` : ""}.`;
   }
 
   if (eventType === "TRAJECTORY_SNAPSHOT_RECORDED") {

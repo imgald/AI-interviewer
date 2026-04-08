@@ -473,6 +473,10 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                   value={String(detail.sessionSummary.latestDecision.policyArchetype ?? "unknown")}
                                 />
                                 <MetricCard
+                                  label="Policy Mode"
+                                  value={String(detail.sessionSummary.latestDecision.policyMode ?? "unknown")}
+                                />
+                                <MetricCard
                                   label="Blocked By Invariant"
                                   value={String(detail.sessionSummary.latestDecision.blockedByInvariant ?? "none")}
                                 />
@@ -547,6 +551,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                   <div style={panelStyle}>{String(detail.sessionSummary.latestDecision.justificationWhyThisAction)}</div>
                                 </div>
                               ) : null}
+                              {detail.sessionSummary.latestDecision.policyAdaptationReason ? (
+                                <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                                  <strong>Policy Adaptation</strong>
+                                  <div style={panelStyle}>{String(detail.sessionSummary.latestDecision.policyAdaptationReason)}</div>
+                                </div>
+                              ) : null}
                               {Array.isArray(detail.sessionSummary.latestDecision.supportingSignals) &&
                               detail.sessionSummary.latestDecision.supportingSignals.length > 0 ? (
                                 <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
@@ -615,6 +625,21 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                   </div>
                                 ))}
                               </dl>
+                              {Array.isArray(detail.sessionSummary.latestIntent.competingIntents) &&
+                              detail.sessionSummary.latestIntent.competingIntents.length > 0 ? (
+                                <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                                  <strong>Competing Intents</strong>
+                                  <div style={{ display: "grid", gap: 8 }}>
+                                    {detail.sessionSummary.latestIntent.competingIntents.map((item, index) => (
+                                      <div key={`admin-competing-intent-${index}`} style={panelStyle}>
+                                        <strong>{String(item.intent ?? "unknown")}</strong>
+                                        {item.score !== undefined ? ` (${Math.round(Number(item.score) * 100)}%)` : ""}
+                                        {item.reason ? ` - ${String(item.reason)}` : ""}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
                             </>
                           ) : (
                             <p style={{ margin: "10px 0 0", color: "var(--muted)" }}>No intent snapshot recorded yet.</p>
@@ -843,6 +868,12 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                     ) : null}
                                   </div>
                                 ) : null}
+                                {item.policyArchetype || item.policyMode ? (
+                                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                    {item.policyArchetype ? <Badge tone="info">policy: {item.policyArchetype}</Badge> : null}
+                                    {item.policyMode ? <Badge tone="neutral">mode: {item.policyMode}</Badge> : null}
+                                  </div>
+                                ) : null}
                                 {item.decisionPathway && item.decisionPathway.length > 0 ? (
                                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                                     {item.decisionPathway.map((step) => (
@@ -859,6 +890,25 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                                         {step}
                                       </Badge>
                                     ))}
+                                  </div>
+                                ) : null}
+                                {item.policyAdaptationReason ? (
+                                  <div style={{ color: "var(--muted)" }}>
+                                    <strong>Policy adaptation:</strong> {item.policyAdaptationReason}
+                                  </div>
+                                ) : null}
+                                {item.competingIntents && item.competingIntents.length > 0 ? (
+                                  <div style={{ display: "grid", gap: 8 }}>
+                                    <strong>Competing intents</strong>
+                                    <div style={{ display: "grid", gap: 8 }}>
+                                      {item.competingIntents.map((candidate, index) => (
+                                        <div key={`${item.id}-competing-${index}`} style={panelStyle}>
+                                          <strong>{candidate.intent ?? "unknown"}</strong>
+                                          {candidate.score !== undefined ? ` (${Math.round(Number(candidate.score) * 100)}%)` : ""}
+                                          {candidate.reason ? ` - ${candidate.reason}` : ""}
+                                        </div>
+                                      ))}
+                                    </div>
                                   </div>
                                 ) : null}
                                 {item.answeredTargets && item.answeredTargets.length > 0 ? (

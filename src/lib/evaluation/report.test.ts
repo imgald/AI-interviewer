@@ -531,3 +531,4 @@ it("downgrades the recommendation band when independence is weak despite a middl
   expect(((reportJson.recommendationBasis as Record<string, unknown>).band as string)).toMatch(/Borderline|No Hire/);
   expect(((reportJson.recommendationBasis as Record<string, unknown>).independenceSignal as string)).toBe("weak");
 });
+

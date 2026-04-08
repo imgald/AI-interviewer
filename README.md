@@ -712,24 +712,46 @@ Success criteria:
 - candidate DNA becomes a live control input, not just a report output
 - `/admin` can explain why one policy path was chosen over another
 
-Phase 1 status:
+Status: `Completed`
+
+Stage 2 implementation summary:
 - added `src/lib/assistant/candidate_dna.ts` for a deterministic DNA vector:
   - reasoning
   - implementation
   - coachability
   - independence
+- candidate DNA now deterministically adapts the live policy mode:
+  - `guided`
+  - `balanced`
+  - `challenging`
 - assistant turns now emit:
   - `CANDIDATE_DNA_RECORDED`
   - `SHADOW_POLICY_EVALUATED`
-- `shadow policy` currently compares the active archetype against a deterministic counter-archetype:
+- `shadow policy` now compares the active archetype against a deterministic counter-archetype:
   - `bar_raiser <-> collaborative`
+- decision explainability is stronger across live turns:
+  - chosen intent
+  - competing intents
+  - policy mode
+  - policy adaptation reason
+  - invariant override cause
+- a counterfactual challenge hook now exists for overconfident but thin reasoning before implementation
 - `/admin` now surfaces:
   - latest candidate DNA
   - latest shadow-policy evaluation
   - diff fields between actual and shadow policy
-- next step:
-  - thread DNA and shadow-policy visibility into `/report`
-  - start letting DNA influence live policy mode selection more directly
+  - competing intents
+  - policy adaptation details
+- `/report` now surfaces:
+  - latest candidate DNA
+  - latest shadow policy
+  - policy mode / policy adaptation
+  - competing intents
+
+Exit criteria met:
+- policy differences are measurable instead of anecdotal
+- candidate DNA is now a live control input, not just a report output
+- `/admin` and `/report` can explain why one policy path was chosen over another
 
 #### Stage 3: Juror & Rubric
 
@@ -802,7 +824,6 @@ These remain permanent system rules regardless of roadmap stage:
   - status:
     - `candidateDeclaredDone` / `implementationAlreadyDone` / `finalWrapUpDelivered` now feed memory + decision logic
     - regression coverage added so implementation done + summary done closes cleanly
-
 
 
 

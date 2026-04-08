@@ -84,6 +84,7 @@ export type CandidateDecision = {
   intentReason?: string;
   intentTargetSignal?: string;
   expectedOutcome?: IntentDecision["expectedOutcome"];
+  competingIntents?: NonNullable<IntentDecision["competingIntents"]>;
   trajectory?: TrajectoryEstimate["candidateTrajectory"];
   expectedWithNoIntervention?: TrajectoryEstimate["expectedWithNoIntervention"];
   interventionValue?: TrajectoryEstimate["interventionValue"];
@@ -93,6 +94,8 @@ export type CandidateDecision = {
   timing?: "ask_now" | "defer" | "skip";
   closureCandidate?: boolean;
   policyArchetype?: PolicyArchetype;
+  policyMode?: "persona_default" | "guided" | "balanced" | "challenging";
+  policyAdaptationReason?: string;
   decisionPathway?: string[];
   justificationWhyNow?: string;
   justificationWhyThisAction?: string;
@@ -233,6 +236,7 @@ export function makeCandidateDecision(input: {
       intentReason: resolvedIntent.reason,
       intentTargetSignal: resolvedIntent.targetSignal,
       expectedOutcome: resolvedIntent.expectedOutcome,
+      competingIntents: resolvedIntent.competingIntents,
       trajectory: resolvedTrajectory.candidateTrajectory,
       expectedWithNoIntervention: resolvedTrajectory.expectedWithNoIntervention,
       interventionValue: resolvedTrajectory.interventionValue,
@@ -364,6 +368,33 @@ export function makeCandidateDecision(input: {
           : "A tiny example, the exact next step, and the expected state or output.",
       suggestedStage: currentStage,
       policyAction: policy.recommendedAction,
+    });
+  }
+
+  if (
+    !latestExecutionRun &&
+    signals.confidence >= 0.82 &&
+    signals.reasoningDepth === "thin" &&
+    currentStage !== "IMPLEMENTATION" &&
+    !targetAlreadyAnswered("correctness", "complexity")
+  ) {
+    return attachIntentTrajectory({
+      action: "probe_correctness",
+      target: "correctness",
+      question:
+        signals.complexityRigor === "missing"
+          ? "Stress-test the idea once: if the input size jumped to 10^5, where would the current plan bend or break, and what would have to stay true for it to still work?"
+          : "Let us pressure-test the logic once: give me one input shape where this approach is most likely to break, and explain why it still stays correct there.",
+      reason:
+        "The candidate sounds confident, but the reasoning signal is still thin. A counterfactual challenge is the highest-value way to test whether the confidence is grounded.",
+      confidence: 0.85,
+      targetCodeLine: "the assumption or invariant that has to survive the hardest input shape",
+      specificIssue:
+        "The candidate is speaking confidently, but the current reasoning evidence is still too thin to trust without a stress test.",
+      expectedAnswer:
+        "A concrete counterexample, scale case, or fragile input shape plus the invariant or adaptation that keeps the solution valid.",
+      suggestedStage: currentStage,
+      policyAction: "PROBE_APPROACH",
     });
   }
 

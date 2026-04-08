@@ -15,7 +15,11 @@ import { extractCandidateSignalsSmart, type CandidateSignalSnapshot } from "@/li
 import { buildMemoryLedger } from "@/lib/assistant/memory_ledger";
 import { applyDecisionInvariants, buildDecisionJustification } from "@/lib/assistant/invariants";
 import { assessLatentCalibration } from "@/lib/assistant/latent_calibration";
-import { assessCandidateDna, type CandidateDnaProfile } from "@/lib/assistant/candidate_dna";
+import {
+  adaptPolicyToCandidateDna,
+  assessCandidateDna,
+  type CandidateDnaProfile,
+} from "@/lib/assistant/candidate_dna";
 import { decideInterviewerIntent, type IntentDecision } from "@/lib/assistant/interviewer_intent";
 import { assessPassConditions, selectRelevantPassAssessment } from "@/lib/assistant/pass_conditions";
 import { applyDecisionPressure, assessInterviewPacing } from "@/lib/assistant/pacing";
@@ -1757,7 +1761,7 @@ function normalizeStage(stage: string | null | undefined): CodingInterviewStage 
 
 function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSignalSnapshot) {
   const currentStage = normalizeStage(input.currentStage);
-  const policyConfig = mapPersonaToPolicy({
+  const basePolicyConfig = mapPersonaToPolicy({
     personaSummary: input.personaSummary,
     appliedPromptContext: input.appliedPromptContext,
   });
@@ -1798,6 +1802,8 @@ function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSign
     memory: ledger,
     latestExecutionRun: input.latestExecutionRun,
   });
+  const policyAdaptation = adaptPolicyToCandidateDna(basePolicyConfig, candidateDna);
+  const policyConfig = policyAdaptation.policyConfig;
   const decision = makeCandidateDecision({
     currentStage,
     policy,
@@ -1843,7 +1849,9 @@ function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSign
   });
   const finalizedDecision = {
     ...invariantResult.decision,
-    policyArchetype: policyConfig.archetype,
+    policyArchetype: basePolicyConfig.archetype,
+    policyMode: policyAdaptation.policyMode,
+    policyAdaptationReason: policyAdaptation.reason,
     decisionPathway: invariantResult.decisionPathway,
     ...toDecisionJustificationFields(buildDecisionJustification({
       decision: invariantResult.decision,
@@ -1857,7 +1865,7 @@ function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSign
     currentStage,
     signals,
     policy,
-    actualPolicyArchetype: policyConfig.archetype,
+    actualPolicyArchetype: basePolicyConfig.archetype,
     recentEvents: input.recentEvents,
     latestExecutionRun: input.latestExecutionRun,
     intent,

@@ -149,6 +149,21 @@ type ReportJson = {
   latestDecision?: LatestDecision | null;
   latestIntent?: Record<string, unknown> | null;
   latestTrajectory?: Record<string, unknown> | null;
+  latestCandidateDna?: {
+    vector?: Record<string, unknown>;
+    dominantTraits?: string[];
+    recommendedMode?: string;
+    rationale?: string[];
+  } | null;
+  latestShadowPolicy?: {
+    archetype?: string;
+    action?: string;
+    target?: string;
+    pressure?: string;
+    timing?: string;
+    diff?: string[];
+    reason?: string;
+  } | null;
   sessionCritic?: SessionCriticSummary | null;
   stageReplay?: StageReplayGroup[];
   intentTimeline?: Array<{ createdAt?: string; stage?: string | null; payload?: Record<string, unknown> }>;
@@ -626,6 +641,14 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
                 value={`${transcriptTruth.activeCommittedCount} active / ${transcriptTruth.supersededCount} superseded / ${transcriptTruth.pendingCount} pending`}
               />
               <MetricRow label="Current Stage" value={reportCurrentStage ?? "Unknown"} />
+              <MetricRow
+                label="DNA Mode"
+                value={stringValue(reportJson.latestCandidateDna?.recommendedMode) ?? "unknown"}
+              />
+              <MetricRow
+                label="Shadow Policy"
+                value={stringValue(reportJson.latestShadowPolicy?.archetype) ?? "unknown"}
+              />
             </div>
           </article>
         </section>
@@ -731,6 +754,8 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
                 <MetricRow label="Action" value={reportJson.latestDecision.action ?? "unknown"} />
                 <MetricRow label="Target" value={reportJson.latestDecision.target ?? "unknown"} />
                 <MetricRow label="Policy Action" value={reportJson.latestDecision.policyAction ?? "unknown"} />
+                <MetricRow label="Policy Mode" value={String((reportJson.latestDecision as Record<string, unknown>).policyMode ?? "unknown")} />
+                <MetricRow label="Policy Archetype" value={String((reportJson.latestDecision as Record<string, unknown>).policyArchetype ?? "unknown")} />
                 <MetricRow
                   label="Decision Confidence"
                   value={
@@ -764,6 +789,24 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
                   <strong>Reason</strong>
                   <p style={{ ...mutedParagraphStyle, marginTop: 8 }}>{reportJson.latestDecision.reason ?? "No decision reason captured."}</p>
                 </div>
+                {stringValue((reportJson.latestDecision as Record<string, unknown>).policyAdaptationReason) ? (
+                  <div style={listItemStyle}>
+                    <strong>Policy adaptation</strong>
+                    <p style={{ ...mutedParagraphStyle, marginTop: 8 }}>
+                      {stringValue((reportJson.latestDecision as Record<string, unknown>).policyAdaptationReason)}
+                    </p>
+                  </div>
+                ) : null}
+                {Array.isArray((reportJson.latestDecision as Record<string, unknown>).decisionPathway) && ((reportJson.latestDecision as Record<string, unknown>).decisionPathway as unknown[]).length > 0 ? (
+                  <div style={listItemStyle}>
+                    <strong>Decision pathway</strong>
+                    <div style={{ ...pillRowStyle, marginTop: 8 }}>
+                      {((reportJson.latestDecision as Record<string, unknown>).decisionPathway as unknown[]).map((step, index) => (
+                        <span key={`report-decision-path-${index}`} style={stagePillStyle}>{String(step)}</span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 {reportJson.latestDecision.specificIssue ? (
                   <div style={listItemStyle}>
                     <strong>Specific issue</strong>
@@ -834,6 +877,27 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
                     </p>
                   </div>
                 ) : null}
+                {Array.isArray(reportJson.latestIntent.competingIntents) && reportJson.latestIntent.competingIntents.length > 0 ? (
+                  <div style={listItemStyle}>
+                    <strong>Competing intents</strong>
+                    <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+                      {reportJson.latestIntent.competingIntents.map((item, index) => {
+                        const record = typeof item === "object" && item !== null ? (item as Record<string, unknown>) : {};
+                        return (
+                          <div key={`competing-intent-${index}`} style={listItemStyle}>
+                            <strong>{stringValue(record.intent) ?? "intent"}</strong>
+                            {typeof record.score === "number" ? (
+                              <p style={{ ...mutedParagraphStyle, marginTop: 8 }}>Score: {Math.round(Number(record.score) * 100)}%</p>
+                            ) : null}
+                            {stringValue(record.reason) ? (
+                              <p style={{ ...mutedParagraphStyle, marginTop: 8 }}>{stringValue(record.reason)}</p>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : (
               <p style={mutedParagraphStyle}>No intent snapshot recorded yet.</p>
@@ -879,6 +943,72 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
               </div>
             ) : (
               <p style={mutedParagraphStyle}>No trajectory snapshot recorded yet.</p>
+            )}
+          </article>
+        </section>
+
+        <section style={gridStyle}>
+          <article style={panelStyle}>
+            <h2 style={sectionTitleStyle}>Latest Candidate DNA</h2>
+            {reportJson.latestCandidateDna ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                <MetricRow label="Mode" value={stringValue(reportJson.latestCandidateDna.recommendedMode) ?? "unknown"} />
+                <MetricRow label="Reasoning" value={asPercent(reportJson.latestCandidateDna.vector, "reasoning")} />
+                <MetricRow label="Implementation" value={asPercent(reportJson.latestCandidateDna.vector, "implementation")} />
+                <MetricRow label="Coachability" value={asPercent(reportJson.latestCandidateDna.vector, "coachability")} />
+                <MetricRow label="Independence" value={asPercent(reportJson.latestCandidateDna.vector, "independence")} />
+                {Array.isArray(reportJson.latestCandidateDna.dominantTraits) && reportJson.latestCandidateDna.dominantTraits.length > 0 ? (
+                  <div style={listItemStyle}>
+                    <strong>Dominant traits</strong>
+                    <div style={{ ...pillRowStyle, marginTop: 8 }}>
+                      {reportJson.latestCandidateDna.dominantTraits.map((trait, index) => (
+                        <span key={`report-latest-dna-trait-${index}`} style={stagePillStyle}>{String(trait)}</span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {Array.isArray(reportJson.latestCandidateDna.rationale) && reportJson.latestCandidateDna.rationale.length > 0 ? (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <strong>Rationale</strong>
+                    {reportJson.latestCandidateDna.rationale.map((note, index) => (
+                      <div key={`report-latest-dna-note-${index}`} style={listItemStyle}>{String(note)}</div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p style={mutedParagraphStyle}>No live candidate DNA snapshot recorded yet.</p>
+            )}
+          </article>
+
+          <article style={panelStyle}>
+            <h2 style={sectionTitleStyle}>Latest Shadow Policy</h2>
+            {reportJson.latestShadowPolicy ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                <MetricRow label="Archetype" value={stringValue(reportJson.latestShadowPolicy.archetype) ?? "unknown"} />
+                <MetricRow label="Action" value={stringValue(reportJson.latestShadowPolicy.action) ?? "unknown"} />
+                <MetricRow label="Target" value={stringValue(reportJson.latestShadowPolicy.target) ?? "unknown"} />
+                <MetricRow label="Pressure" value={stringValue(reportJson.latestShadowPolicy.pressure) ?? "unknown"} />
+                <MetricRow label="Timing" value={stringValue(reportJson.latestShadowPolicy.timing) ?? "unknown"} />
+                {Array.isArray(reportJson.latestShadowPolicy.diff) && reportJson.latestShadowPolicy.diff.length > 0 ? (
+                  <div style={listItemStyle}>
+                    <strong>Diff fields</strong>
+                    <div style={{ ...pillRowStyle, marginTop: 8 }}>
+                      {reportJson.latestShadowPolicy.diff.map((item, index) => (
+                        <span key={`report-shadow-diff-${index}`} style={stagePillStyle}>{String(item)}</span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {stringValue(reportJson.latestShadowPolicy.reason) ? (
+                  <div style={listItemStyle}>
+                    <strong>Reason</strong>
+                    <p style={{ ...mutedParagraphStyle, marginTop: 8 }}>{stringValue(reportJson.latestShadowPolicy.reason)}</p>
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <p style={mutedParagraphStyle}>No shadow-policy evaluation recorded yet.</p>
             )}
           </article>
         </section>
@@ -1634,6 +1764,15 @@ function summarizeStageCount(count: number | undefined, label: string) {
   return `${safeCount} ${label}${safeCount === 1 ? "" : "s"}`;
 }
 
+function asPercent(vector: unknown, key: string) {
+  if (typeof vector !== "object" || vector === null) {
+    return "unknown";
+  }
+
+  const value = (vector as Record<string, unknown>)[key];
+  return typeof value === "number" ? `${Math.round(value * 100)}%` : "unknown";
+}
+
 function summarizeStageSection(group: StageReplaySection) {
   const signals = group.signalSnapshots?.length ?? 0;
   const decisions = group.decisions?.length ?? 0;
@@ -1854,6 +1993,23 @@ const miniPreStyle = {
   overflowX: "auto" as const,
   fontSize: 12,
 } as const;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -1,4 +1,5 @@
 import type { CandidateSignalSnapshot } from "@/lib/assistant/signal_extractor";
+import type { PolicyConfig } from "@/lib/assistant/policy-config";
 
 type ExecutionRunLike = {
   status: "PASSED" | "FAILED" | "ERROR" | "TIMEOUT";
@@ -25,6 +26,12 @@ export type CandidateDnaProfile = {
   dominantTraits: string[];
   recommendedMode: "guided" | "balanced" | "challenging";
   rationale: string[];
+};
+
+export type CandidateDnaPolicyAdaptation = {
+  policyConfig: PolicyConfig;
+  policyMode: CandidateDnaProfile["recommendedMode"] | "persona_default";
+  reason: string;
 };
 
 export function assessCandidateDna(input: {
@@ -162,4 +169,76 @@ function buildRationale(
 
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
+}
+
+export function adaptPolicyToCandidateDna(
+  policyConfig: PolicyConfig,
+  profile: CandidateDnaProfile,
+): CandidateDnaPolicyAdaptation {
+  if (profile.recommendedMode === "balanced") {
+    return {
+      policyConfig,
+      policyMode: "persona_default",
+      reason: "Candidate DNA stayed balanced, so the persona-selected policy remains unchanged.",
+    };
+  }
+
+  if (profile.recommendedMode === "guided") {
+    return {
+      policyMode: "guided",
+      reason:
+        "Low independence signal shifted the live policy toward guided interviewing with softer pressure and earlier rescue.",
+      policyConfig: {
+        ...policyConfig,
+        intentBias: {
+          ...policyConfig.intentBias,
+          guide: clamp01(policyConfig.intentBias.guide + 0.2),
+          unblock: clamp01(policyConfig.intentBias.unblock + 0.18),
+          probe: clamp01(policyConfig.intentBias.probe - 0.15),
+          pressure: clamp01(policyConfig.intentBias.pressure - 0.2),
+        },
+        pacing: {
+          ...policyConfig.pacing,
+          preferLetRun: clamp01(policyConfig.pacing.preferLetRun + 0.08),
+          moveToImplementationBias: clamp01(policyConfig.pacing.moveToImplementationBias - 0.08),
+          closeTopicAggression: clamp01(policyConfig.pacing.closeTopicAggression - 0.1),
+        },
+        hints: {
+          ...policyConfig.hints,
+          delayFactor: Math.max(0.5, policyConfig.hints.delayFactor - 0.2),
+          maxHintLevel: Math.min(3, policyConfig.hints.maxHintLevel + 1),
+          rescueModeBias: clamp01(policyConfig.hints.rescueModeBias + 0.2),
+        },
+      },
+    };
+  }
+
+  return {
+    policyMode: "challenging",
+    reason:
+      "High reasoning and independence signals shifted the live policy toward a more challenging path with later rescue and tighter probing.",
+    policyConfig: {
+      ...policyConfig,
+      intentBias: {
+        ...policyConfig.intentBias,
+        validate: clamp01(policyConfig.intentBias.validate + 0.08),
+        probe: clamp01(policyConfig.intentBias.probe + 0.15),
+        pressure: clamp01(policyConfig.intentBias.pressure + 0.18),
+        guide: clamp01(policyConfig.intentBias.guide - 0.12),
+        unblock: clamp01(policyConfig.intentBias.unblock - 0.1),
+      },
+      pacing: {
+        ...policyConfig.pacing,
+        preferLetRun: clamp01(policyConfig.pacing.preferLetRun - 0.06),
+        moveToImplementationBias: clamp01(policyConfig.pacing.moveToImplementationBias + 0.08),
+        closeTopicAggression: clamp01(policyConfig.pacing.closeTopicAggression + 0.06),
+      },
+      hints: {
+        ...policyConfig.hints,
+        delayFactor: Math.min(1.6, policyConfig.hints.delayFactor + 0.15),
+        maxHintLevel: Math.max(1, policyConfig.hints.maxHintLevel - 1),
+        rescueModeBias: clamp01(policyConfig.hints.rescueModeBias - 0.18),
+      },
+    },
+  };
 }

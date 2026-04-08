@@ -185,11 +185,13 @@ describe("buildUnifiedOpsFeed", () => {
         urgency: "low",
         interruptionCost: "high",
         policyArchetype: "collaborative",
+        policyMode: "guided",
         blockedByInvariant: "flow_preservation",
       },
     });
 
     expect(description).toMatch(/policy=collaborative/i);
+    expect(description).toMatch(/mode=guided/i);
     expect(description).toMatch(/blocked=flow_preservation/i);
   });
 
@@ -254,12 +256,18 @@ describe("buildUnifiedOpsFeed", () => {
         intent: "advance",
         targetSignal: "implementation",
         expectedOutcome: "advance_stage",
+        competingIntents: [
+          { intent: "validate", reason: "still could check correctness", score: 0.42 },
+          { intent: "guide", reason: "could still nudge testing", score: 0.24 },
+        ],
       },
     });
 
     expect(description).toMatch(/interviewer intent/i);
     expect(description).toMatch(/advance/i);
     expect(description).toMatch(/implementation/i);
+    expect(description).toMatch(/alternatives considered/i);
+    expect(description).toMatch(/validate/i);
   });
 
   it("describes trajectory snapshots in a readable way", () => {

@@ -259,6 +259,8 @@ export function generateSessionReport(input: SessionReportInput): GeneratedSessi
   const latestExecutionRun = input.executionRuns.at(-1) ?? null;
   const latestIntent = findLatestIntentSnapshot(input.intentSnapshots ?? []);
   const latestTrajectory = findLatestTrajectorySnapshot(input.trajectorySnapshots ?? []);
+  const latestCandidateDna = findLatestEventPayload(input.events, "CANDIDATE_DNA_RECORDED", "candidateDna");
+  const latestShadowPolicy = findLatestEventPayload(input.events, "SHADOW_POLICY_EVALUATED", "shadowPolicy");
   const hintRequestedCount = input.events.filter((event) => event.eventType === "HINT_REQUESTED").length;
   const hintServedCount = input.events.filter((event) => event.eventType === "HINT_SERVED").length;
   const hintLedger = buildHintingLedger(input.events);
@@ -397,6 +399,8 @@ export function generateSessionReport(input: SessionReportInput): GeneratedSessi
       latestDecision,
       latestIntent,
       latestTrajectory,
+      latestCandidateDna,
+      latestShadowPolicy,
       stageReplay,
       stageSections,
       evidenceTrace,
@@ -1521,6 +1525,19 @@ function findLatestTrajectorySnapshot(trajectorySnapshots: TrajectorySnapshotLik
   return latestSnapshot ? asRecord(latestSnapshot.trajectoryJson) : null;
 }
 
+function findLatestEventPayload(
+  events: SessionEventLike[],
+  eventType: string,
+  field: string,
+) {
+  const latestEvent = [...events].reverse().find((event) => event.eventType === eventType);
+  if (!latestEvent) {
+    return null;
+  }
+
+  return asRecord(asRecord(latestEvent.payloadJson)[field]);
+}
+
 function buildSnapshotTimeline(
   kind: "intent" | "trajectory",
   rows: Array<{
@@ -1789,6 +1806,8 @@ function buildCounterfactualSummary(events: SessionEventLike[]): CounterfactualS
     shouldWaitBeforeIntervening: criticEvents.some((verdict) => verdict.shouldWaitBeforeIntervening === true),
   };
 }
+
+
 
 
 
