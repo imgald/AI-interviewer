@@ -98,10 +98,16 @@ describe("buildUnifiedOpsFeed", () => {
   it("describes dedicated STT transcript refinement", () => {
     const description = buildSessionEventDescription("CANDIDATE_TRANSCRIPT_REFINED", {
       transcriptProvider: "openai-stt",
+      transcriptVersion: 2,
+      correctionOfId: "seg-1",
+      transcriptSegmentId: "seg-2",
     });
 
     expect(description).toMatch(/dedicated stt/i);
     expect(description).toMatch(/openai-stt/i);
+    expect(description).toMatch(/v2/i);
+    expect(description).toMatch(/replaces seg-1/i);
+    expect(description).toMatch(/active=seg-2/i);
   });
 
   it("describes signal snapshots in a readable way", () => {

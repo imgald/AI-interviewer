@@ -150,4 +150,82 @@ describe("session code run routes", () => {
       },
     });
   });
+
+  it("uses the latest committed correction when deriving the post-run stage", async () => {
+    prisma.interviewSession.findUnique.mockResolvedValue({
+      id: "session-1",
+      transcripts: [
+        { id: "seg-1", segmentIndex: 0, speaker: "USER", text: "I will start coding now.", isFinal: true },
+        { id: "seg-2", segmentIndex: 1, speaker: "USER", text: "I would first clarify the constraints.", isFinal: true },
+      ],
+      executionRuns: [],
+      events: [
+        {
+          id: "evt-refine-1",
+          eventType: "CANDIDATE_TRANSCRIPT_REFINED",
+          eventTime: new Date("2026-03-27T21:00:00.000Z"),
+          payloadJson: { transcriptSegmentId: "seg-2", correctionOfId: "seg-1" },
+        },
+      ],
+    });
+    prisma.codeSnapshot.findFirst.mockResolvedValue({ snapshotIndex: 0 });
+    prisma.codeSnapshot.create.mockResolvedValue({
+      id: "snapshot-1",
+      sessionId: "session-1",
+      language: "PYTHON",
+      content: "print('hello')",
+      snapshotIndex: 1,
+      source: "RUN",
+    });
+    executeCode.mockResolvedValue({
+      status: "PASSED",
+      stdout: "hello",
+      stderr: "",
+      runtimeMs: 18,
+      memoryKb: null,
+    });
+    prisma.executionRun.create.mockResolvedValue({
+      id: "run-1",
+      sessionId: "session-1",
+      status: "PASSED",
+      stdout: "hello",
+      stderr: "",
+      runtimeMs: 18,
+      memoryKb: null,
+      createdAt: new Date("2026-03-27T21:10:00.000Z"),
+      codeSnapshot: {
+        id: "snapshot-1",
+        language: "PYTHON",
+        snapshotIndex: 1,
+        source: "RUN",
+      },
+    });
+    prisma.sessionEvent.create.mockResolvedValue({ id: "evt-1" });
+
+    const { POST } = await import("@/app/api/sessions/[id]/code-runs/route");
+    const response = await POST(
+      new Request("http://localhost", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          language: "PYTHON",
+          code: "print('hello')",
+          source: "RUN",
+        }),
+      }),
+      {
+        params: Promise.resolve({ id: "session-1" }),
+      },
+    );
+
+    expect(response.status).toBe(201);
+    expect(prisma.sessionEvent.create).toHaveBeenCalledTimes(3);
+    expect(prisma.sessionEvent.create).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "STAGE_ADVANCED",
+        }),
+      }),
+    );
+  });
 });

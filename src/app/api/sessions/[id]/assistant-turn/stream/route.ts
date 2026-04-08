@@ -39,7 +39,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     return fail("Interview session not found", 404);
   }
 
-  const committedTranscripts = getCommittedTranscriptSegments(session.transcripts);
+  const committedTranscripts = getCommittedTranscriptSegments(session.transcripts, session.events);
 
   const currentStage = deriveCurrentCodingStage({
     events: session.events,

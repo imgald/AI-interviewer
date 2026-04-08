@@ -205,7 +205,45 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                             label="Closure Quality"
                             value={String(detail.sessionSummary.sessionCritic?.closureQuality ?? "unknown")}
                           />
+                          <MetricCard
+                            label="Transcript Truth"
+                            value={
+                              detail.sessionSummary.transcriptTruth
+                                ? `${detail.sessionSummary.transcriptTruth.activeCommittedCount} active / ${detail.sessionSummary.transcriptTruth.supersededCount} superseded`
+                                : "unknown"
+                            }
+                          />
                         </div>
+                      </section>
+                    ) : null}
+
+                    {detail.sessionSummary ? (
+                      <section style={panelStyle}>
+                        <div style={{ display: "grid", gap: 6 }}>
+                          <strong>Transcript Truth</strong>
+                          <p style={{ margin: 0, color: "var(--muted)" }}>
+                            Truth Engine audit summary for the latest session. Active committed turns are the only turns that should influence decision, report, and replay.
+                          </p>
+                        </div>
+                        {detail.sessionSummary.transcriptTruth ? (
+                          <div
+                            style={{
+                              display: "grid",
+                              gap: 12,
+                              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                              marginTop: 14,
+                            }}
+                          >
+                            <MetricCard label="Total Segments" value={String(detail.sessionSummary.transcriptTruth.totalSegments)} />
+                            <MetricCard label="Pending" value={String(detail.sessionSummary.transcriptTruth.pendingCount)} />
+                            <MetricCard label="Committed" value={String(detail.sessionSummary.transcriptTruth.committedCount)} />
+                            <MetricCard label="Active Committed" value={String(detail.sessionSummary.transcriptTruth.activeCommittedCount)} />
+                            <MetricCard label="Superseded" value={String(detail.sessionSummary.transcriptTruth.supersededCount)} />
+                            <MetricCard label="Versioned" value={String(detail.sessionSummary.transcriptTruth.versionedCount)} />
+                          </div>
+                        ) : (
+                          <p style={{ margin: "12px 0 0", color: "var(--muted)" }}>No transcript audit state available yet.</p>
+                        )}
                       </section>
                     ) : null}
 

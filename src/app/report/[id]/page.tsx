@@ -2,6 +2,7 @@
 import { notFound } from "next/navigation";
 import { buildMemoryLedger } from "@/lib/assistant/memory_ledger";
 import { summarizeSessionCritic, type SessionCriticSummary } from "@/lib/assistant/session_critic";
+import { getCommittedTranscriptSegments, summarizeTranscriptTruth } from "@/lib/session/commit-arbiter";
 import { buildSessionSnapshotState } from "@/lib/session/state";
 import {
   readCandidateStateSnapshots,
@@ -325,9 +326,11 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
       : snapshotState.stageJourney;
   const stageReplaySections = reportJson.stageSections ?? [];
   const dimensions = normalizeDimensions(reportJson.dimensions, session.evaluation?.dimensionScores ?? []);
+  const committedTranscripts = getCommittedTranscriptSegments(session.transcripts, session.events);
+  const transcriptTruth = summarizeTranscriptTruth(session.transcripts, session.events);
   const replayItems = buildReplayItems({
     events: session.events,
-    transcripts: session.transcripts,
+    transcripts: committedTranscripts,
     executionRuns: session.executionRuns,
     reportJson,
   });
@@ -618,6 +621,10 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
                 label="Turns"
                 value={`${reportJson.transcriptSummary?.userTurns ?? 0} user / ${reportJson.transcriptSummary?.aiTurns ?? 0} AI`}
               />
+              <MetricRow
+                label="Transcript Truth"
+                value={`${transcriptTruth.activeCommittedCount} active / ${transcriptTruth.supersededCount} superseded / ${transcriptTruth.pendingCount} pending`}
+              />
               <MetricRow label="Current Stage" value={reportCurrentStage ?? "Unknown"} />
             </div>
           </article>
@@ -628,6 +635,21 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
           <p style={{ ...mutedParagraphStyle, marginTop: 0 }}>
             Open this section for full interviewer-state, ledger, and replay diagnostics. The executive summary and stage storyline above are the product-facing view.
           </p>
+
+        <section style={panelStyle}>
+          <h2 style={sectionTitleStyle}>Transcript Truth</h2>
+          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+            <Metric label="Total Segments" value={String(transcriptTruth.totalSegments)} />
+            <Metric label="Pending" value={String(transcriptTruth.pendingCount)} />
+            <Metric label="Committed" value={String(transcriptTruth.committedCount)} />
+            <Metric label="Active Committed" value={String(transcriptTruth.activeCommittedCount)} />
+            <Metric label="Superseded" value={String(transcriptTruth.supersededCount)} />
+            <Metric label="Versioned" value={String(transcriptTruth.versionedCount)} />
+          </div>
+          <p style={{ ...mutedParagraphStyle, marginTop: 12 }}>
+            Report scoring and replay now prefer the active committed transcript chain. Superseded turns remain part of audit history but should not drive evaluation or interviewer state.
+          </p>
+        </section>
 
         <section style={gridStyle}>
           <article style={panelStyle}>

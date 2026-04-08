@@ -1,6 +1,10 @@
 ﻿import { prisma } from "@/lib/db";
 import { fail, ok } from "@/lib/http";
-import { decorateTranscriptForRead, deriveTranscriptCommitState } from "@/lib/session/commit-arbiter";
+import {
+  buildTranscriptVersionIndex,
+  decorateTranscriptForRead,
+  deriveTranscriptCommitState,
+} from "@/lib/session/commit-arbiter";
 import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
 import { createTranscriptSegmentSchema } from "@/schemas/session-runtime";
 
@@ -24,9 +28,24 @@ export async function GET(_: Request, { params }: RouteContext) {
     where: { sessionId: id },
     orderBy: { segmentIndex: "asc" },
   });
+  const transcriptEvents = await prisma.sessionEvent.findMany({
+    where: {
+      sessionId: id,
+      eventType: SESSION_EVENT_TYPES.CANDIDATE_TRANSCRIPT_REFINED,
+    },
+    orderBy: { eventTime: "asc" },
+  });
+  const versionIndex = buildTranscriptVersionIndex(transcripts, transcriptEvents);
 
   return ok({
-    transcripts: transcripts.map((transcript) => decorateTranscriptForRead(transcript)),
+    transcripts: transcripts.map((transcript) => {
+      const metadata = transcript.id ? versionIndex.get(transcript.id) : null;
+      return decorateTranscriptForRead(transcript, {
+        correctionOfId: metadata?.correctionOfId ?? null,
+        transcriptVersion: metadata?.transcriptVersion ?? 1,
+        supersededById: metadata?.supersededById ?? null,
+      });
+    }),
   });
 }
 
@@ -83,20 +102,39 @@ export async function POST(request: Request, { params }: RouteContext) {
         transcriptSegmentId: segment.id,
         isFinal: parsed.data.isFinal,
         commitState: deriveTranscriptCommitState({ isFinal: parsed.data.isFinal }),
+        correctionOfId: parsed.data.correctionOfId ?? null,
         transcriptSource: parsed.data.transcriptSource ?? null,
         transcriptProvider: parsed.data.transcriptProvider ?? null,
       },
     },
   });
 
+  let transcriptVersion = 1;
+  if (parsed.data.correctionOfId) {
+    const existingTranscripts = await prisma.transcriptSegment.findMany({
+      where: { sessionId: id },
+      orderBy: { segmentIndex: "asc" },
+    });
+    const transcriptEvents = await prisma.sessionEvent.findMany({
+      where: {
+        sessionId: id,
+        eventType: SESSION_EVENT_TYPES.CANDIDATE_TRANSCRIPT_REFINED,
+      },
+      orderBy: { eventTime: "asc" },
+    });
+    const versionIndex = buildTranscriptVersionIndex(existingTranscripts, transcriptEvents);
+    transcriptVersion = (versionIndex.get(parsed.data.correctionOfId)?.transcriptVersion ?? 1) + 1;
+  }
+
   if (
     parsed.data.speaker === "USER" &&
-    parsed.data.transcriptSource !== undefined &&
-    parsed.data.transcriptSource !== "browser" &&
-    parsed.data.transcriptSource !== "manual" &&
-    parsed.data.transcriptSource !== "assistant" &&
-    parsed.data.sourceText &&
-    parsed.data.sourceText.trim() !== parsed.data.text.trim()
+    (parsed.data.correctionOfId ||
+      (parsed.data.transcriptSource !== undefined &&
+        parsed.data.transcriptSource !== "browser" &&
+        parsed.data.transcriptSource !== "manual" &&
+        parsed.data.transcriptSource !== "assistant" &&
+        parsed.data.sourceText &&
+        parsed.data.sourceText.trim() !== parsed.data.text.trim()))
   ) {
     await prisma.sessionEvent.create({
       data: {
@@ -105,8 +143,9 @@ export async function POST(request: Request, { params }: RouteContext) {
         payloadJson: {
           transcriptSegmentId: segment.id,
           correctionOfId: parsed.data.correctionOfId ?? null,
+          transcriptVersion,
           transcriptProvider: parsed.data.transcriptProvider ?? parsed.data.transcriptSource,
-          originalText: parsed.data.sourceText,
+          originalText: parsed.data.sourceText ?? null,
           refinedText: parsed.data.text,
         },
       },
@@ -117,6 +156,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     {
       transcript: decorateTranscriptForRead(segment, {
         correctionOfId: parsed.data.correctionOfId ?? null,
+        transcriptVersion,
       }),
     },
     { status: 201 },

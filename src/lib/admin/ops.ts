@@ -3,6 +3,7 @@ import { buildMemoryLedger } from "@/lib/assistant/memory_ledger";
 import { assessLatentCalibration, type LatentCalibration } from "@/lib/assistant/latent_calibration";
 import { assessFlowState, type FlowState } from "@/lib/assistant/flow_state";
 import { summarizeSessionCritic, type SessionCriticSummary } from "@/lib/assistant/session_critic";
+import { summarizeTranscriptTruth, type TranscriptTruthSummary } from "@/lib/session/commit-arbiter";
 import { buildSessionSnapshotState } from "@/lib/session/state";
 import {
   readCandidateStateSnapshots,
@@ -69,12 +70,13 @@ export type SessionSummary = {
   latestCodeRunStatus: string | null;
   hintCount: number;
   failedRunCount: number;
+  transcriptTruth: TranscriptTruthSummary | null;
   timeline: SessionTimelineItem[];
 };
 
 export type SessionTimelineItem = {
   id: string;
-  kind: "stage" | "signal" | "decision" | "intent" | "trajectory" | "critic" | "hint" | "code_run";
+  kind: "stage" | "signal" | "decision" | "intent" | "trajectory" | "critic" | "hint" | "code_run" | "transcript";
   at: string;
   title: string;
   summary: string;
@@ -148,6 +150,9 @@ export async function getAdminProfileDetail(profileId: string): Promise<AdminPro
         orderBy: { createdAt: "desc" },
         take: 10,
         include: {
+          transcripts: {
+            orderBy: { segmentIndex: "asc" },
+          },
           events: {
             orderBy: { eventTime: "desc" },
             take: 40,
@@ -199,6 +204,13 @@ export async function getAdminProfileDetail(profileId: string): Promise<AdminPro
           orderBy: { createdAt: "asc" },
           take: 10,
         }),
+        prisma.sessionEvent.findMany({
+          where: {
+            sessionId: latestSession.id,
+            eventType: "CANDIDATE_TRANSCRIPT_REFINED",
+          },
+          orderBy: { eventTime: "asc" },
+        }),
       ])
     : null;
 
@@ -227,6 +239,7 @@ export async function getAdminProfileDetail(profileId: string): Promise<AdminPro
             intentSnapshots: latestSessionSnapshotData[2],
             trajectorySnapshots: latestSessionSnapshotData[3],
             executionRuns: latestSessionSnapshotData[4],
+            transcriptTruthEvents: latestSessionSnapshotData[5],
           })
         : null,
   };
@@ -289,13 +302,18 @@ function buildPersonaEventDescription(eventType: string, payloadJson: unknown) {
 function summarizeSession(session: {
   id: string;
   events: Array<{ eventType: string; eventTime: Date; payloadJson: unknown }>;
+  transcripts: Array<{ id?: string; speaker: "USER" | "AI" | "SYSTEM"; text: string; segmentIndex: number; isFinal: boolean }>;
   candidateStateSnapshots: Array<{ id: string; stage: string | null; source: string | null; snapshotJson: unknown; createdAt: Date }>;
   interviewerDecisionSnapshots: Array<{ id: string; stage: string | null; source: string | null; decisionJson: unknown; createdAt: Date }>;
   intentSnapshots: Array<{ id: string; stage: string | null; source: string | null; intentJson: unknown; createdAt: Date }>;
   trajectorySnapshots: Array<{ id: string; stage: string | null; source: string | null; trajectoryJson: unknown; createdAt: Date }>;
   executionRuns: Array<{ status: "PASSED" | "FAILED" | "ERROR" | "TIMEOUT"; stdout: string | null; stderr: string | null; createdAt: Date }>;
+  transcriptTruthEvents: Array<{ eventType: string; eventTime: Date; payloadJson: unknown }>;
 }): SessionSummary {
   const ordered = [...session.events].sort((left, right) => left.eventTime.getTime() - right.eventTime.getTime());
+  const truthEvents = [...ordered, ...session.transcriptTruthEvents].sort(
+    (left, right) => left.eventTime.getTime() - right.eventTime.getTime(),
+  );
   const latestCriticEvent = [...ordered].reverse().find((event) => event.eventType === "CRITIC_VERDICT_RECORDED");
   const latestCodeRunEvent = [...ordered].reverse().find((event) => event.eventType === "CODE_RUN_COMPLETED");
   const latestCritic = latestCriticEvent ? asRecord(asRecord(latestCriticEvent.payloadJson).criticVerdict) : null;
@@ -325,6 +343,7 @@ function summarizeSession(session: {
     events: ordered,
     latestSignals: snapshotState.latestSignals,
   });
+  const transcriptTruth = summarizeTranscriptTruth(session.transcripts, truthEvents);
 
   return {
     sessionId: session.id,
@@ -349,7 +368,8 @@ function summarizeSession(session: {
     latestCodeRunStatus: latestCodeRunEvent ? stringValue(asRecord(latestCodeRunEvent.payloadJson).status) : null,
     hintCount,
     failedRunCount,
-    timeline: buildSessionTimeline(ordered),
+    transcriptTruth,
+    timeline: buildSessionTimeline(truthEvents),
   };
 }
 
@@ -360,6 +380,7 @@ function buildSessionTimeline(
     .filter((event) =>
       [
         "STAGE_ADVANCED",
+        "CANDIDATE_TRANSCRIPT_REFINED",
         "SIGNAL_SNAPSHOT_RECORDED",
         "DECISION_RECORDED",
         "INTENT_SNAPSHOT_RECORDED",
@@ -381,6 +402,17 @@ function buildSessionTimeline(
           at: event.eventTime.toISOString(),
           title: "Stage advanced",
           summary: previousStage ? `${previousStage} -> ${stage}` : stage,
+          payload,
+        };
+      }
+
+      if (event.eventType === "CANDIDATE_TRANSCRIPT_REFINED") {
+        return {
+          id: `${event.eventType}-${event.eventTime.toISOString()}`,
+          kind: "transcript" as const,
+          at: event.eventTime.toISOString(),
+          title: "Transcript corrected",
+          summary: `Committed truth updated${stringValue(payload.transcriptVersion) ? ` to v${stringValue(payload.transcriptVersion)}` : ""}${stringValue(payload.correctionOfId) ? `, replacing ${stringValue(payload.correctionOfId)}` : ""}${stringValue(payload.transcriptSegmentId) ? ` with ${stringValue(payload.transcriptSegmentId)}` : ""}.`,
           payload,
         };
       }
@@ -619,7 +651,17 @@ export function buildSessionEventDescription(eventType: string, payloadJson: unk
   }
 
   if (eventType === "CANDIDATE_TRANSCRIPT_REFINED") {
-    return `Dedicated STT refined a candidate turn using ${stringOrFallback(payload.transcriptProvider, "unknown provider")}.`;
+    const version = stringValue(payload.transcriptVersion);
+    const correctionOfId = stringValue(payload.correctionOfId);
+    const segmentId = stringValue(payload.transcriptSegmentId);
+    const chainBits = [
+      version ? `v${version}` : null,
+      correctionOfId ? `replaces ${correctionOfId}` : null,
+      segmentId ? `active=${segmentId}` : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    return `Dedicated STT refined a candidate turn using ${stringOrFallback(payload.transcriptProvider, "unknown provider")}${chainBits ? ` (${chainBits})` : ""}.`;
   }
 
   if (eventType === "CANDIDATE_TURN_AUTOSUBMITTED") {

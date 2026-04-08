@@ -2,6 +2,7 @@
 import { generateSessionReport } from "@/lib/evaluation/report";
 import { prisma } from "@/lib/db";
 import { fail, ok } from "@/lib/http";
+import { getCommittedTranscriptSegments } from "@/lib/session/commit-arbiter";
 import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
 import {
   readCandidateStateSnapshots,
@@ -86,7 +87,7 @@ export async function POST(_: Request, { params }: RouteContext) {
     questionPrompt: session.question?.prompt ?? "",
     targetLevel: session.targetLevel,
     selectedLanguage: session.selectedLanguage,
-    transcripts: session.transcripts.map((segment) => ({
+    transcripts: getCommittedTranscriptSegments(session.transcripts, session.events).map((segment) => ({
       speaker: segment.speaker,
       text: segment.text,
     })),

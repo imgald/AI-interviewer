@@ -2,6 +2,7 @@ import Link from "next/link";
 import { InterviewRoomClient } from "@/components/interview/interview-room-client";
 import { deriveCurrentCodingStage } from "@/lib/assistant/stages";
 import { prisma } from "@/lib/db";
+import { getCommittedTranscriptSegments } from "@/lib/session/commit-arbiter";
 import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
 import { resolveLowCostMode, summarizeUsageFromSessionEvents } from "@/lib/usage/cost";
 
@@ -58,9 +59,18 @@ export default async function InterviewRoomPage({ params }: InterviewRoomPagePro
     });
   }
 
+  const transcriptRefinementEvents = await prisma.sessionEvent.findMany({
+    where: {
+      sessionId: session.id,
+      eventType: SESSION_EVENT_TYPES.CANDIDATE_TRANSCRIPT_REFINED,
+    },
+    orderBy: { eventTime: "asc" },
+  });
+  const truthEvents = [...session.events, ...transcriptRefinementEvents];
+  const committedTranscripts = getCommittedTranscriptSegments(session.transcripts, truthEvents);
   const initialStage = deriveCurrentCodingStage({
-    events: session.events,
-    transcripts: session.transcripts,
+    events: truthEvents,
+    transcripts: committedTranscripts,
     latestExecutionRun: session.executionRuns[0] ?? null,
   });
   const lowCostMode = resolveLowCostMode(session.events);
@@ -80,7 +90,7 @@ export default async function InterviewRoomPage({ params }: InterviewRoomPagePro
       lowCostMode={lowCostMode}
       initialUsageSummary={usageSummary}
       initialStage={initialStage}
-      initialTranscripts={session.transcripts.map((segment) => ({
+      initialTranscripts={committedTranscripts.map((segment) => ({
         id: segment.id,
         speaker: segment.speaker,
         segmentIndex: segment.segmentIndex,

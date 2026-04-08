@@ -648,20 +648,43 @@ Concrete work:
 - support `correction_of_id`-style evidence-chain updates when previously committed text is revised
 - tighten the denoise pipeline so filler is removed conservatively while still preserving short but meaningful confirmations such as `OK` and `Yes`
 
-Phase 1 status:
-- `commit-arbiter.ts` is live
-- transcript reads now expose `commitState`, `transcriptVersion`, and `correctionOfId`
+Status: `Completed`
+
+Stage 1 implementation summary:
+- `commit-arbiter.ts` is live and now resolves the latest committed correction chain instead of only filtering pending turns
+- transcript reads now expose:
+  - `commitState`
+  - `transcriptVersion`
+  - `correctionOfId`
+  - `supersededById`
 - `assistant-turn` and `assistant-turn/stream` now consume committed transcripts only
-- transcript creation/refinement routes now emit commit metadata needed for replay and future correction chaining
-- regression coverage exists for committed-only routing and transcript read decoration
+- transcript creation/refinement routes now emit commit metadata needed for replay and correction chaining
+- session detail reads now return committed/current transcript truth plus a transcript-truth summary
+- interview room initial transcripts now start from committed/current truth instead of raw transcript history
+- code-run stage derivation now uses committed transcript truth, so superseded STT versions do not skew stage movement
+- report generation and report replay now consume latest committed truth instead of raw transcript history
+- `/admin` and `/report` now surface transcript-truth audit metrics:
+  - active committed
+  - superseded
+  - pending
+  - versioned
+- `/admin` session truth summary now includes full transcript refinement chains rather than only the latest visible event window
+- regression coverage now exists for:
+  - committed-only assistant turns
+  - transcript version decoration
+  - superseded transcript exclusion in reports
+  - committed-truth session detail reads
+  - committed-truth code-run stage derivation
 
 Success criteria:
 - no decision is made from half-final or UI-only transcript text
 - streamed text, spoken text, committed text, and replay state stay aligned
 - STT corrections can update evidence without corrupting the session history
 
-Immediate next implementation:
-- refactor assistant-turn routing so no committed decision is produced without passing the commit arbiter
+Exit criteria met:
+- no decision is made from half-final or UI-only transcript text
+- committed truth now survives STT correction chains without poisoning downstream decision/report paths
+- truth state is inspectable in `/admin` and `/report` instead of being hidden inside transcript route internals
 
 #### Stage 2: Strategist & DNA
 
@@ -761,7 +784,6 @@ These remain permanent system rules regardless of roadmap stage:
   - add a regression scenario so:
     - implementation done + summary done -> `close_topic` or `end_interview`
     - no reopen of implementation after wrap-up
-
 
 
 

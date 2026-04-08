@@ -1,6 +1,13 @@
 import { prisma } from "@/lib/db";
 import { fail, ok } from "@/lib/http";
 import { deriveCurrentCodingStage } from "@/lib/assistant/stages";
+import {
+  buildTranscriptVersionIndex,
+  decorateTranscriptForRead,
+  getCommittedTranscriptSegments,
+  summarizeTranscriptTruth,
+} from "@/lib/session/commit-arbiter";
+import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
 import { resolveLowCostMode, summarizeUsageFromSessionEvents } from "@/lib/usage/cost";
 
 type RouteContext = {
@@ -40,9 +47,20 @@ export async function GET(_: Request, { params }: RouteContext) {
     return fail("Interview session not found", 404);
   }
 
+  const transcriptRefinementEvents = await prisma.sessionEvent.findMany({
+    where: {
+      sessionId: session.id,
+      eventType: SESSION_EVENT_TYPES.CANDIDATE_TRANSCRIPT_REFINED,
+    },
+    orderBy: { eventTime: "asc" },
+  });
+  const truthEvents = [...session.events, ...transcriptRefinementEvents];
+  const transcriptVersionIndex = buildTranscriptVersionIndex(session.transcripts, truthEvents);
+  const committedTranscripts = getCommittedTranscriptSegments(session.transcripts, truthEvents);
+  const transcriptTruth = summarizeTranscriptTruth(session.transcripts, truthEvents);
   const currentStage = deriveCurrentCodingStage({
-    events: session.events,
-    transcripts: session.transcripts,
+    events: truthEvents,
+    transcripts: committedTranscripts,
     latestExecutionRun: session.executionRuns[0] ?? null,
   });
   const lowCostMode = resolveLowCostMode(session.events);
@@ -62,7 +80,10 @@ export async function GET(_: Request, { params }: RouteContext) {
     lowCostMode,
     usageSummary,
     currentStage,
-    transcripts: session.transcripts,
+    transcripts: committedTranscripts.map((transcript) =>
+      decorateTranscriptForRead(transcript, transcript.id ? transcriptVersionIndex.get(transcript.id) ?? undefined : undefined),
+    ),
+    transcriptTruth,
     events: session.events,
     evaluation: session.evaluation,
     feedbackReport: session.feedbackReport,

@@ -165,6 +165,66 @@ describe("assistant turn route", () => {
       }),
     });
   });
+
+  it("uses the latest committed correction instead of a superseded transcript", async () => {
+    prisma.interviewSession.findUnique.mockResolvedValue({
+      id: "session-1",
+      mode: "CODING",
+      targetLevel: "SDE2",
+      selectedLanguage: "PYTHON",
+      endedAt: null,
+      question: {
+        title: "Merge Intervals",
+        prompt: "Merge overlapping intervals.",
+      },
+      interviewerContext: null,
+      interviewerProfile: null,
+      transcripts: [
+        { id: "seg-1", segmentIndex: 0, speaker: "USER", text: "I would use a mean heap.", isFinal: true },
+        { id: "seg-2", segmentIndex: 1, speaker: "USER", text: "I would use a min heap.", isFinal: true },
+      ],
+      executionRuns: [],
+      events: [
+        {
+          eventType: "CANDIDATE_TRANSCRIPT_REFINED",
+          eventTime: new Date("2026-04-07T00:00:00.000Z"),
+          payloadJson: {
+            transcriptSegmentId: "seg-2",
+            correctionOfId: "seg-1",
+          },
+        },
+      ],
+    });
+    generateAssistantTurn.mockResolvedValue({
+      reply: "What would the complexity be?",
+      suggestedStage: "APPROACH_DISCUSSION",
+      source: "fallback",
+    });
+    prisma.transcriptSegment.create.mockResolvedValue({
+      id: "seg-3",
+      text: "What would the complexity be?",
+      speaker: "AI",
+      segmentIndex: 2,
+    });
+    prisma.sessionEvent.create.mockResolvedValue({ id: "evt-1" });
+
+    const { POST } = await import("@/app/api/sessions/[id]/assistant-turn/route");
+    const response = await POST(new Request("http://localhost", { method: "POST" }), {
+      params: Promise.resolve({ id: "session-1" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(generateAssistantTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recentTranscripts: [
+          {
+            speaker: "USER",
+            text: "I would use a min heap.",
+          },
+        ],
+      }),
+    );
+  });
 });
 
 

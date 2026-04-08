@@ -3,6 +3,7 @@ import { deriveCurrentCodingStage } from "@/lib/assistant/stages";
 import { prisma } from "@/lib/db";
 import { fail, ok } from "@/lib/http";
 import { executeCode } from "@/lib/sandbox/execute";
+import { getCommittedTranscriptSegments } from "@/lib/session/commit-arbiter";
 import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
 import { createExecutionRunSchema } from "@/schemas/session-runtime";
 
@@ -150,9 +151,10 @@ export async function POST(request: Request, { params }: RouteContext) {
     },
   });
 
+  const committedTranscripts = getCommittedTranscriptSegments(session.transcripts, session.events);
   const currentStage = deriveCurrentCodingStage({
     events: session.events,
-    transcripts: session.transcripts,
+    transcripts: committedTranscripts,
     latestExecutionRun: session.executionRuns[0] ?? null,
   });
 
