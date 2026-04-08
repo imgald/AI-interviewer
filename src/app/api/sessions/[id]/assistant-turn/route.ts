@@ -211,6 +211,36 @@ export async function POST(_: Request, { params }: RouteContext) {
     events.push(trajectoryEvent);
   }
 
+  if (turn.candidateDna) {
+    const dnaEvent = await prisma.sessionEvent.create({
+      data: {
+        sessionId: id,
+        eventType: SESSION_EVENT_TYPES.CANDIDATE_DNA_RECORDED,
+        payloadJson: {
+          stage: currentStage,
+          source: turn.source,
+          candidateDna: turn.candidateDna,
+        },
+      },
+    });
+    events.push(dnaEvent);
+  }
+
+  if (turn.shadowPolicy) {
+    const shadowPolicyEvent = await prisma.sessionEvent.create({
+      data: {
+        sessionId: id,
+        eventType: SESSION_EVENT_TYPES.SHADOW_POLICY_EVALUATED,
+        payloadJson: {
+          stage: currentStage,
+          source: turn.source,
+          shadowPolicy: turn.shadowPolicy,
+        },
+      },
+    });
+    events.push(shadowPolicyEvent);
+  }
+
   if (turn.criticVerdict) {
     const criticEvent = await prisma.sessionEvent.create({
       data: {

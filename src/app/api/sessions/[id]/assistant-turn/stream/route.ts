@@ -136,6 +136,8 @@ export async function POST(request: Request, { params }: RouteContext) {
               decision?: unknown;
               intent?: unknown;
               trajectory?: unknown;
+              candidateDna?: unknown;
+              shadowPolicy?: unknown;
               criticVerdict?: unknown;
               providerFailure?: {
                 provider: "gemini" | "openai";
@@ -287,6 +289,36 @@ export async function POST(request: Request, { params }: RouteContext) {
             },
           });
           events.push(trajectoryEvent);
+        }
+
+        if (finalTurn.candidateDna) {
+          const dnaEvent = await prisma.sessionEvent.create({
+            data: {
+              sessionId: id,
+              eventType: SESSION_EVENT_TYPES.CANDIDATE_DNA_RECORDED,
+              payloadJson: {
+                stage: currentStage,
+                source: finalTurn.source,
+                candidateDna: finalTurn.candidateDna,
+              },
+            },
+          });
+          events.push(dnaEvent);
+        }
+
+        if (finalTurn.shadowPolicy) {
+          const shadowPolicyEvent = await prisma.sessionEvent.create({
+            data: {
+              sessionId: id,
+              eventType: SESSION_EVENT_TYPES.SHADOW_POLICY_EVALUATED,
+              payloadJson: {
+                stage: currentStage,
+                source: finalTurn.source,
+                shadowPolicy: finalTurn.shadowPolicy,
+              },
+            },
+          });
+          events.push(shadowPolicyEvent);
         }
 
         if (finalTurn.criticVerdict) {

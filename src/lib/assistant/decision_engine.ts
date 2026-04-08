@@ -1126,7 +1126,9 @@ export function makeCandidateDecision(input: {
 
   if (
     currentStage === "WRAP_UP" &&
-    (passAssessment.wrapUp.complete ||
+    (ledger.finalWrapUpDelivered ||
+      (ledger.implementationAlreadyDone && ledger.candidateDeclaredDone) ||
+      passAssessment.wrapUp.complete ||
       (targetAlreadyAnswered("summary") &&
         (signals.progress === "done" || hasCollectedEvidence("implementation_plan", "test_cases", "complexity_tradeoff"))))
   ) {
@@ -1134,7 +1136,10 @@ export function makeCandidateDecision(input: {
       action: "end_interview",
       target: "summary",
       question: "That covers this question well. We are done here.",
-      reason: "The candidate has already provided the final summary and the core evidence is saturated, so the interviewer should explicitly close instead of asking for more.",
+      reason:
+        ledger.finalWrapUpDelivered || (ledger.implementationAlreadyDone && ledger.candidateDeclaredDone)
+          ? "The candidate has already declared implementation complete and delivered a final wrap-up, so the interviewer should close cleanly instead of reopening the topic."
+          : "The candidate has already provided the final summary and the core evidence is saturated, so the interviewer should explicitly close instead of asking for more.",
       confidence: 0.93,
       targetCodeLine: "the final wrapped solution story that is already on record",
       specificIssue: "The active topic is already covered well enough and additional prompting would only create repetition.",

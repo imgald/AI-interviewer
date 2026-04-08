@@ -15,10 +15,12 @@ import { extractCandidateSignalsSmart, type CandidateSignalSnapshot } from "@/li
 import { buildMemoryLedger } from "@/lib/assistant/memory_ledger";
 import { applyDecisionInvariants, buildDecisionJustification } from "@/lib/assistant/invariants";
 import { assessLatentCalibration } from "@/lib/assistant/latent_calibration";
+import { assessCandidateDna, type CandidateDnaProfile } from "@/lib/assistant/candidate_dna";
 import { decideInterviewerIntent, type IntentDecision } from "@/lib/assistant/interviewer_intent";
 import { assessPassConditions, selectRelevantPassAssessment } from "@/lib/assistant/pass_conditions";
 import { applyDecisionPressure, assessInterviewPacing } from "@/lib/assistant/pacing";
 import { mapPersonaToPolicy } from "@/lib/assistant/policy-mapper";
+import { getPolicyPreset, type PolicyArchetype } from "@/lib/assistant/policy-config";
 import { assessFlowState } from "@/lib/assistant/flow_state";
 import { estimateCandidateTrajectory, type TrajectoryEstimate } from "@/lib/assistant/trajectory_estimator";
 import {
@@ -88,11 +90,23 @@ type GenerateAssistantTurnResult = {
   decision?: CandidateDecision;
   intent?: IntentDecision;
   trajectory?: TrajectoryEstimate;
+  candidateDna?: CandidateDnaProfile;
+  shadowPolicy?: ShadowPolicyEvaluation;
   criticVerdict?: CriticVerdict;
   providerFailure?: {
     provider: "gemini" | "openai";
     message: string;
   };
+};
+
+type ShadowPolicyEvaluation = {
+  archetype: PolicyArchetype;
+  action: CandidateDecision["action"];
+  target: CandidateDecision["target"];
+  pressure?: CandidateDecision["pressure"];
+  timing?: CandidateDecision["timing"];
+  reason: string;
+  diff: Array<"action" | "target" | "pressure" | "timing">;
 };
 
 const PROVIDER_COOLDOWN_MS = 90_000;
@@ -112,7 +126,7 @@ export async function generateAssistantTurn(
     recentEvents: input.recentEvents,
     latestExecutionRun: input.latestExecutionRun,
   });
-  const { decision, intent, trajectory } = buildDecision(input, signals);
+  const { decision, intent, trajectory, candidateDna, shadowPolicy } = buildDecision(input, signals);
   let providerFailure: GenerateAssistantTurnResult["providerFailure"] | undefined;
 
   for (const provider of resolveProviderSequence()) {
@@ -120,7 +134,11 @@ export async function generateAssistantTurn(
       try {
         const reply = await generateWithGemini(input, signals, decision, intent, trajectory);
         if (reply) {
-          return reply;
+          return {
+            ...reply,
+            candidateDna,
+            shadowPolicy,
+          };
         }
         providerFailure = { provider: "gemini", message: "Gemini returned no reply." };
         logProviderFallback("gemini", providerFailure.message);
@@ -139,7 +157,11 @@ export async function generateAssistantTurn(
       try {
         const reply = await generateWithOpenAI(input, signals, decision, intent, trajectory);
         if (reply) {
-          return reply;
+          return {
+            ...reply,
+            candidateDna,
+            shadowPolicy,
+          };
         }
         providerFailure = { provider: "openai", message: "OpenAI returned no reply." };
         logProviderFallback("openai", providerFailure.message);
@@ -155,7 +177,7 @@ export async function generateAssistantTurn(
   }
 
   logProviderFallback("fallback", "Using local interviewer heuristics.");
-  return generateFallbackTurn(input, signals, decision, intent, trajectory, providerFailure);
+  return generateFallbackTurn(input, signals, decision, intent, trajectory, candidateDna, shadowPolicy, providerFailure);
 }
 
 export async function* streamAssistantTurn(
@@ -168,12 +190,17 @@ export async function* streamAssistantTurn(
     recentEvents: input.recentEvents,
     latestExecutionRun: input.latestExecutionRun,
   });
-  const { decision, intent, trajectory } = buildDecision(input, signals);
+  const { decision, intent, trajectory, candidateDna, shadowPolicy } = buildDecision(input, signals);
   let providerFailure: GenerateAssistantTurnResult["providerFailure"] | undefined;
 
   for (const provider of resolveProviderSequence()) {
     if (provider === "gemini") {
-      const geminiResult = yield* yieldProviderStream(streamWithGemini(input, signals, decision, intent, trajectory, options), input, "gemini");
+      const geminiResult = yield* yieldProviderStream(
+        streamWithGemini(input, signals, decision, intent, trajectory, options),
+        input,
+        "gemini",
+        { candidateDna, shadowPolicy },
+      );
       if (geminiResult.handled) {
         return;
       }
@@ -187,7 +214,12 @@ export async function* streamAssistantTurn(
     }
 
     if (provider === "openai") {
-      const openAiResult = yield* yieldProviderStream(streamWithOpenAI(input, signals, decision, intent, trajectory, options), input, "openai");
+      const openAiResult = yield* yieldProviderStream(
+        streamWithOpenAI(input, signals, decision, intent, trajectory, options),
+        input,
+        "openai",
+        { candidateDna, shadowPolicy },
+      );
       if (openAiResult.handled) {
         return;
       }
@@ -201,7 +233,16 @@ export async function* streamAssistantTurn(
   }
 
   logProviderFallback("fallback", "Using local interviewer heuristics.");
-  const fallback = generateFallbackTurn(input, signals, decision, intent, trajectory, providerFailure);
+  const fallback = generateFallbackTurn(
+    input,
+    signals,
+    decision,
+    intent,
+    trajectory,
+    candidateDna,
+    shadowPolicy,
+    providerFailure,
+  );
   for (const chunk of chunkText(fallback.reply)) {
     if (options?.signal?.aborted) {
       return;
@@ -215,6 +256,7 @@ async function* yieldProviderStream(
   stream: AsyncGenerator<StreamingAssistantTurnChunk>,
   input: GenerateAssistantTurnInput,
   source: "openai" | "gemini",
+  extras?: Pick<GenerateAssistantTurnResult, "candidateDna" | "shadowPolicy">,
 ): AsyncGenerator<
   StreamingAssistantTurnChunk,
   { handled: boolean; providerFailure?: GenerateAssistantTurnResult["providerFailure"] }
@@ -233,6 +275,14 @@ async function* yieldProviderStream(
 
       if (chunk.final) {
         yieldedFinal = true;
+        yield {
+          ...chunk,
+          final: {
+            ...chunk.final,
+            ...extras,
+          },
+        };
+        continue;
       }
 
       yield chunk;
@@ -253,13 +303,14 @@ async function* yieldProviderStream(
 
   if (!yieldedFinal && accumulated.trim()) {
     const final = finalizeReply(accumulated);
-    yield {
-      final: {
-        reply: final,
-        suggestedStage: inferStage(final, input),
-        source,
-      },
-    };
+      yield {
+        final: {
+          reply: final,
+          suggestedStage: inferStage(final, input),
+          source,
+          ...extras,
+        },
+      };
   }
 
   return { handled: true };
@@ -889,6 +940,8 @@ function generateFallbackTurn(
   decision: CandidateDecision,
   intent: IntentDecision,
   trajectory: TrajectoryEstimate,
+  candidateDna: CandidateDnaProfile,
+  shadowPolicy: ShadowPolicyEvaluation,
   providerFailure?: GenerateAssistantTurnResult["providerFailure"],
 ): GenerateAssistantTurnResult {
   const latestUserTurn = [...input.recentTranscripts].reverse().find((item) => item.speaker === "USER");
@@ -903,9 +956,16 @@ function generateFallbackTurn(
     recentEvents: input.recentEvents,
     latestExecutionRun: latestRun,
   });
+  const finalizeFallback = (
+    result: Omit<GenerateAssistantTurnResult, "candidateDna" | "shadowPolicy">,
+  ): GenerateAssistantTurnResult => ({
+    ...result,
+    candidateDna,
+    shadowPolicy,
+  });
 
   if (!latestUserTurn && !latestAiTurn) {
-    return {
+    return finalizeFallback({
       reply: `Let's get started with ${input.questionTitle}. Before you code, could you restate the problem in your own words and walk me through your initial approach?`,
       suggestedStage: "PROBLEM_UNDERSTANDING",
       source: "fallback",
@@ -915,11 +975,11 @@ function generateFallbackTurn(
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
       escalationReason: policy.escalationReason,
-    };
+    });
   }
 
   if (policy.promptStrategy === "CONSTRAINED") {
-    return {
+    return finalizeFallback({
       reply: withVariation(decision.question, latestAiTurn?.text, "Let's make this concrete. Pick one specific thing to inspect next, like a branch, pointer update, or edge case, and explain why you would start there."),
       suggestedStage: policy.nextStage ?? currentStage,
       source: "fallback",
@@ -929,11 +989,11 @@ function generateFallbackTurn(
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
       escalationReason: policy.escalationReason,
-    };
+    });
   }
 
   if (policy.promptStrategy === "GUIDED" && currentStage === "APPROACH_DISCUSSION") {
-    return {
+    return finalizeFallback({
       reply: withVariation(decision.question, latestAiTurn?.text, "Let's tighten the approach. Name the state you keep, how it changes each step, and the condition that tells you you're done."),
       suggestedStage: currentStage,
       source: "fallback",
@@ -943,12 +1003,12 @@ function generateFallbackTurn(
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
       escalationReason: policy.escalationReason,
-    };
+    });
   }
 
   if (policy.shouldServeHint) {
     const hintedReply = buildFallbackHintReply(policy.hintStyle, policy.hintLevel, latestRun, latestAiTurn?.text);
-    return {
+    return finalizeFallback({
       reply: hintedReply,
       suggestedStage: policy.nextStage ?? currentStage,
       source: "fallback",
@@ -968,11 +1028,11 @@ function generateFallbackTurn(
       hintRequestTiming: decision.hintRequestTiming,
       momentumAtHint: decision.momentumAtHint,
       escalationReason: policy.escalationReason,
-    };
+    });
   }
 
   if (latestRun?.status === "ERROR") {
-    return {
+    return finalizeFallback({
       reply: withVariation(
         "I see the latest run hit an error. What do you think is causing it, and how would you debug it before changing the implementation?",
         latestAiTurn?.text,
@@ -986,11 +1046,11 @@ function generateFallbackTurn(
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
       escalationReason: policy.escalationReason,
-    };
+    });
   }
 
   if (latestRun?.status === "TIMEOUT") {
-    return {
+    return finalizeFallback({
       reply: withVariation(
         "The latest run timed out. Can you reason about the time complexity and what part of the implementation might be doing more work than expected?",
         latestAiTurn?.text,
@@ -1004,11 +1064,11 @@ function generateFallbackTurn(
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
       escalationReason: policy.escalationReason,
-    };
+    });
   }
 
   if (latestRun?.status === "PASSED") {
-    return {
+    return finalizeFallback({
       reply: withVariation(
         "Your latest run completed successfully. Before we move on, what edge cases would you test next, and what are the time and space complexities?",
         latestAiTurn?.text,
@@ -1020,7 +1080,7 @@ function generateFallbackTurn(
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
       escalationReason: policy.escalationReason,
-    };
+    });
   }
 
   const latestUserText = latestUserTurn?.text.toLowerCase() ?? "";
@@ -1028,7 +1088,7 @@ function generateFallbackTurn(
 
   if (currentStage === "PROBLEM_UNDERSTANDING") {
     if (/\b(hash map|two pointers|sort|stack|queue|binary search|dfs|bfs)\b/.test(latestUserText)) {
-      return {
+      return finalizeFallback({
         reply: withVariation(
           "Good, that's a reasonable starting point. Walk me through one small example so I can see how that approach plays out step by step.",
           latestAiTurn?.text,
@@ -1041,10 +1101,10 @@ function generateFallbackTurn(
         providerFailure,
         policyAction: policy.recommendedAction,
         policyReason: policy.reason,
-      };
+      });
     }
 
-    return {
+    return finalizeFallback({
       reply: withVariation(
         "Before we lock in an approach, what constraints or edge conditions matter most here, and how are you interpreting the expected output?",
         latestAiTurn?.text,
@@ -1058,11 +1118,11 @@ function generateFallbackTurn(
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
       escalationReason: policy.escalationReason,
-    };
+    });
   }
 
   if (latestUserText.includes("stuck") || latestUserText.includes("not sure") || latestUserText.includes("don't know")) {
-    return {
+    return finalizeFallback({
       reply: withVariation(
         "Let's narrow it down. What data structure would help you look up or group information quickly here, and why?",
         latestAiTurn?.text,
@@ -1076,11 +1136,11 @@ function generateFallbackTurn(
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
       escalationReason: policy.escalationReason,
-    };
+    });
   }
 
   if (wordCount <= 5) {
-    return {
+    return finalizeFallback({
       reply: withVariation(
         "Could you make that a bit more concrete? Walk me through the steps on one small example.",
         latestAiTurn?.text,
@@ -1094,7 +1154,7 @@ function generateFallbackTurn(
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
       escalationReason: policy.escalationReason,
-    };
+    });
   }
 
   const strategicReply = buildFallbackReplyFromDecision({
@@ -1105,7 +1165,7 @@ function generateFallbackTurn(
   });
 
   if (strategicReply) {
-    return {
+    return finalizeFallback({
       reply: strategicReply,
       suggestedStage: decision.suggestedStage ?? currentStage,
       source: "fallback",
@@ -1115,7 +1175,7 @@ function generateFallbackTurn(
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
       escalationReason: policy.escalationReason,
-    };
+    });
   }
 
   if (
@@ -1124,7 +1184,7 @@ function generateFallbackTurn(
     latestUserText.includes("two pointers") ||
     latestUserText.includes("sort")
   ) {
-    return {
+    return finalizeFallback({
       reply: withVariation(
         currentStage === "IMPLEMENTATION"
           ? "That approach sounds reasonable. As you code it, call out the core loop and any invariant that keeps the implementation correct."
@@ -1142,11 +1202,11 @@ function generateFallbackTurn(
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
       escalationReason: policy.escalationReason,
-    };
+    });
   }
 
   if (latestUserText.includes("complexity") || latestUserText.includes("o(")) {
-    return {
+    return finalizeFallback({
       reply: withVariation(
         "Good. Now think about correctness: what invariants or edge cases would you use to convince yourself this approach is safe?",
         latestAiTurn?.text,
@@ -1160,11 +1220,11 @@ function generateFallbackTurn(
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
       escalationReason: policy.escalationReason,
-    };
+    });
   }
 
   if (currentStage === "IMPLEMENTATION") {
-    return {
+    return finalizeFallback({
       reply: withVariation(
         "Keep implementing, but narrate the key branches as you go. What is the trickiest line or condition in this solution?",
         latestAiTurn?.text,
@@ -1177,11 +1237,11 @@ function generateFallbackTurn(
       providerFailure,
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
-    };
+    });
   }
 
   if (currentStage === "TESTING_AND_COMPLEXITY") {
-    return {
+    return finalizeFallback({
       reply: withVariation(
         "Let's close the loop on validation. Which edge cases would you run, and what are the final time and space complexities?",
         latestAiTurn?.text,
@@ -1194,11 +1254,11 @@ function generateFallbackTurn(
       providerFailure,
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
-    };
+    });
   }
 
   if (latestUserText.includes("edge case") || latestUserText.includes("empty") || latestUserText.includes("duplicate")) {
-    return {
+    return finalizeFallback({
       reply: withVariation(
         "Good catch. How would your implementation handle that case, and do you need to change anything in the core logic?",
         latestAiTurn?.text,
@@ -1209,10 +1269,10 @@ function generateFallbackTurn(
       providerFailure,
       policyAction: policy.recommendedAction,
       policyReason: policy.reason,
-    };
+    });
   }
 
-  return {
+  return finalizeFallback({
     reply: withVariation(
       decision.question,
       latestAiTurn?.text,
@@ -1230,7 +1290,7 @@ function generateFallbackTurn(
     policyAction: policy.recommendedAction,
     policyReason: policy.reason,
     escalationReason: policy.escalationReason,
-  };
+  });
 }
 
 function inferStage(reply: string, input: GenerateAssistantTurnInput) {
@@ -1710,6 +1770,7 @@ function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSign
   const ledger = buildMemoryLedger({
     currentStage,
     recentEvents: input.recentEvents,
+    recentTranscripts: input.recentTranscripts,
     signals,
     latestExecutionRun: input.latestExecutionRun,
   });
@@ -1731,6 +1792,11 @@ function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSign
     latestExecutionRun: input.latestExecutionRun,
     flowState,
     intent,
+  });
+  const candidateDna = assessCandidateDna({
+    signals,
+    memory: ledger,
+    latestExecutionRun: input.latestExecutionRun,
   });
   const decision = makeCandidateDecision({
     currentStage,
@@ -1787,10 +1853,73 @@ function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSign
       blockedByInvariant: invariantResult.blockedByInvariant,
     })),
   };
+  const shadowPolicy = evaluateShadowPolicy({
+    currentStage,
+    signals,
+    policy,
+    actualPolicyArchetype: policyConfig.archetype,
+    recentEvents: input.recentEvents,
+    latestExecutionRun: input.latestExecutionRun,
+    intent,
+    trajectory,
+  }, finalizedDecision);
   return {
     decision: finalizedDecision,
     intent,
     trajectory,
+    candidateDna,
+    shadowPolicy,
+  };
+}
+
+function evaluateShadowPolicy(
+  input: {
+    currentStage: CodingInterviewStage;
+    signals: CandidateSignalSnapshot;
+    policy: ReturnType<typeof resolveCodingInterviewPolicy>;
+    actualPolicyArchetype: PolicyArchetype;
+    recentEvents?: GenerateAssistantTurnInput["recentEvents"];
+    latestExecutionRun?: GenerateAssistantTurnInput["latestExecutionRun"];
+    intent: IntentDecision;
+    trajectory: TrajectoryEstimate;
+  },
+  actualDecision: CandidateDecision,
+): ShadowPolicyEvaluation {
+  const shadowArchetype: PolicyArchetype =
+    input.actualPolicyArchetype === "bar_raiser" ? "collaborative" : "bar_raiser";
+  const shadowDecision = makeCandidateDecision({
+    currentStage: input.currentStage,
+    policy: input.policy,
+    policyConfig: getPolicyPreset(shadowArchetype),
+    signals: input.signals,
+    recentEvents: input.recentEvents,
+    latestExecutionRun: input.latestExecutionRun,
+    intent: input.intent,
+    trajectory: input.trajectory,
+  });
+
+  const diff: ShadowPolicyEvaluation["diff"] = [];
+  if (shadowDecision.action !== actualDecision.action) {
+    diff.push("action");
+  }
+  if (shadowDecision.target !== actualDecision.target) {
+    diff.push("target");
+  }
+  if (shadowDecision.pressure !== actualDecision.pressure) {
+    diff.push("pressure");
+  }
+  if (shadowDecision.timing !== actualDecision.timing) {
+    diff.push("timing");
+  }
+
+  return {
+    archetype: shadowArchetype,
+    action: shadowDecision.action,
+    target: shadowDecision.target,
+    pressure: shadowDecision.pressure,
+    timing: shadowDecision.timing,
+    reason: shadowDecision.reason,
+    diff,
   };
 }
 

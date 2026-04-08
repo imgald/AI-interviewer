@@ -712,6 +712,25 @@ Success criteria:
 - candidate DNA becomes a live control input, not just a report output
 - `/admin` can explain why one policy path was chosen over another
 
+Phase 1 status:
+- added `src/lib/assistant/candidate_dna.ts` for a deterministic DNA vector:
+  - reasoning
+  - implementation
+  - coachability
+  - independence
+- assistant turns now emit:
+  - `CANDIDATE_DNA_RECORDED`
+  - `SHADOW_POLICY_EVALUATED`
+- `shadow policy` currently compares the active archetype against a deterministic counter-archetype:
+  - `bar_raiser <-> collaborative`
+- `/admin` now surfaces:
+  - latest candidate DNA
+  - latest shadow-policy evaluation
+  - diff fields between actual and shadow policy
+- next step:
+  - thread DNA and shadow-policy visibility into `/report`
+  - start letting DNA influence live policy mode selection more directly
+
 #### Stage 3: Juror & Rubric
 
 Priority: `P2`
@@ -780,12 +799,9 @@ These remain permanent system rules regardless of roadmap stage:
   - when the candidate has already declared implementation complete and has already delivered a final summary, the interviewer should close cleanly instead of reopening with lines such as:
     - `feel free to proceed with your implementation`
     - `keep moving`
-  - strengthen `candidateDeclaredDone` / `implementationAlreadyDone` tracking in memory and decision logic
-  - add a regression scenario so:
-    - implementation done + summary done -> `close_topic` or `end_interview`
-    - no reopen of implementation after wrap-up
-
-
+  - status:
+    - `candidateDeclaredDone` / `implementationAlreadyDone` / `finalWrapUpDelivered` now feed memory + decision logic
+    - regression coverage added so implementation done + summary done closes cleanly
 
 
 

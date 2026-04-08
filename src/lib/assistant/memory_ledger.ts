@@ -12,6 +12,11 @@ type ExecutionRunLike = {
   stderr?: string | null;
 };
 
+type TranscriptLike = {
+  speaker: "USER" | "AI" | "SYSTEM";
+  text: string;
+};
+
 type PersistentWeakness = "reasoning" | "testing" | "complexity" | null;
 
 export type MemoryLedger = {
@@ -28,6 +33,9 @@ export type MemoryLedger = {
   recentHints: number;
   recentFailedRuns: number;
   topicSaturation: Record<string, number>;
+  candidateDeclaredDone: boolean;
+  implementationAlreadyDone: boolean;
+  finalWrapUpDelivered: boolean;
   shouldAvoidTarget: (...targets: string[]) => boolean;
   summary: string[];
 };
@@ -35,10 +43,15 @@ export type MemoryLedger = {
 export function buildMemoryLedger(input: {
   currentStage: CodingInterviewStage;
   recentEvents?: SessionEventLike[];
+  recentTranscripts?: TranscriptLike[];
   signals: CandidateSignalSnapshot;
   latestExecutionRun?: ExecutionRunLike | null;
 }): MemoryLedger {
   const recentEvents = input.recentEvents ?? [];
+  const recentTranscripts = input.recentTranscripts ?? [];
+  const recentUserTexts = recentTranscripts
+    .filter((segment) => segment.speaker === "USER")
+    .map((segment) => segment.text.toLowerCase());
   const recentDecisions = recentEvents
     .filter((event) => event.eventType === "DECISION_RECORDED")
     .slice(-5)
@@ -103,6 +116,19 @@ export function buildMemoryLedger(input: {
         : {};
     return payload.status === "FAILED" || payload.status === "ERROR" || payload.status === "TIMEOUT";
   }).length;
+  const candidateDeclaredDone = recentUserTexts.some((text) =>
+    /\b(i am done|i'm done|done with my implementation|implementation is done|implemented already|i have implemented already|finished the implementation|finished coding)\b/i.test(
+      text,
+    ),
+  );
+  const implementationAlreadyDone =
+    candidateDeclaredDone ||
+    input.signals.progress === "done" ||
+    (input.latestExecutionRun?.status === "PASSED" &&
+      recentUserTexts.some((text) =>
+        /\b(implemented|implementation|coded|finished coding|done with my implementation)\b/i.test(text),
+      ));
+  const finalWrapUpDelivered = recentUserTexts.some((text) => looksLikeFinalWrapUp(text));
 
   const summary = buildLedgerSummary({
     answeredTargets,
@@ -112,6 +138,9 @@ export function buildMemoryLedger(input: {
     missingEvidence,
     repeatedFailurePattern,
     persistentWeakness,
+    candidateDeclaredDone,
+    implementationAlreadyDone,
+    finalWrapUpDelivered,
   });
   const topicSaturation = buildTopicSaturation(recentDecisions, answeredTargets);
 
@@ -129,6 +158,9 @@ export function buildMemoryLedger(input: {
     recentHints,
     recentFailedRuns,
     topicSaturation,
+    candidateDeclaredDone,
+    implementationAlreadyDone,
+    finalWrapUpDelivered,
     shouldAvoidTarget: (...targets: string[]) => {
       const hits = recentDecisions.filter((decision) => {
         const normalizedIssue = normalizeIssueKey(decision.specificIssue);
@@ -388,6 +420,9 @@ function buildLedgerSummary(input: {
   missingEvidence: string[];
   repeatedFailurePattern?: string;
   persistentWeakness: PersistentWeakness;
+  candidateDeclaredDone: boolean;
+  implementationAlreadyDone: boolean;
+  finalWrapUpDelivered: boolean;
 }) {
   const summary: string[] = [];
 
@@ -412,8 +447,29 @@ function buildLedgerSummary(input: {
   if (input.persistentWeakness) {
     summary.push(`Persistent weakness: ${input.persistentWeakness}`);
   }
+  if (input.candidateDeclaredDone) {
+    summary.push("Candidate explicitly declared implementation complete.");
+  }
+  if (input.implementationAlreadyDone) {
+    summary.push("Implementation appears complete.");
+  }
+  if (input.finalWrapUpDelivered) {
+    summary.push("Candidate already delivered a final wrap-up.");
+  }
 
   return summary;
+}
+
+function looksLikeFinalWrapUp(text: string) {
+  const summarySignals =
+    /\b(final takeaway|overall approach|tradeoff|time complexity|space complexity|single-pass|one-pass|hash map)\b/i.test(
+      text,
+    );
+  const deliverySignals =
+    /\b(i iterate|i use|the key invariant|the tradeoff is|the final approach is|a single-pass hash map)\b/i.test(
+      text,
+    );
+  return summarySignals && deliverySignals;
 }
 
 function buildTopicSaturation(

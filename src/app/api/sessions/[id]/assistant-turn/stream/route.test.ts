@@ -192,6 +192,74 @@ describe("assistant turn stream route", () => {
     expect(streamAssistantTurn).not.toHaveBeenCalled();
     expect(prisma.sessionEvent.create).toHaveBeenCalledTimes(3);
   });
+
+  it("records candidate DNA and shadow policy events from the streamed final turn", async () => {
+    prisma.interviewSession.findUnique.mockResolvedValue({
+      id: "session-1",
+      mode: "CODING",
+      targetLevel: "SDE2",
+      selectedLanguage: "PYTHON",
+      question: { title: "Two Sum", prompt: "Return indices." },
+      interviewerContext: null,
+      interviewerProfile: null,
+      transcripts: [],
+      executionRuns: [],
+      events: [],
+    });
+    streamAssistantTurn.mockImplementation(async function* () {
+      yield {
+        final: {
+          reply: "Code it.",
+          suggestedStage: "IMPLEMENTATION",
+          source: "fallback",
+          candidateDna: {
+            vector: { reasoning: 0.84, implementation: 0.72, coachability: 0.68, independence: 0.75 },
+            dominantTraits: ["reasoning-heavy", "independent"],
+            recommendedMode: "challenging",
+            rationale: ["Strong signal."],
+          },
+          shadowPolicy: {
+            archetype: "bar_raiser",
+            action: "probe_tradeoff",
+            target: "tradeoff",
+            pressure: "challenging",
+            timing: "ask_now",
+            reason: "Shadow policy would probe tradeoffs earlier.",
+            diff: ["action", "target"],
+          },
+        },
+      };
+    });
+    prisma.transcriptSegment.create.mockResolvedValue({
+      id: "seg-1",
+      text: "Code it.",
+      speaker: "AI",
+      segmentIndex: 0,
+    });
+    prisma.sessionEvent.create.mockResolvedValue({ id: "evt-1", eventType: "GENERIC" });
+
+    const { POST } = await import("@/app/api/sessions/[id]/assistant-turn/stream/route");
+    const response = await POST(new Request("http://localhost", { method: "POST" }), {
+      params: Promise.resolve({ id: "session-1" }),
+    });
+
+    await response.text();
+
+    expect(prisma.sessionEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "CANDIDATE_DNA_RECORDED",
+        }),
+      }),
+    );
+    expect(prisma.sessionEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "SHADOW_POLICY_EVALUATED",
+        }),
+      }),
+    );
+  });
 });
 
 

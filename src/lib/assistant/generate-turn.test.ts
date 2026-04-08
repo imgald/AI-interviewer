@@ -66,6 +66,8 @@ describe("generateAssistantTurn", () => {
 
     expect(result.source).toBe("fallback");
     expect(result.reply).toMatch(/example|starting point/i);
+    expect(result.candidateDna).toBeTruthy();
+    expect(result.shadowPolicy).toBeTruthy();
   });
 
   it("asks for more specificity when the candidate reply is too short", async () => {
@@ -314,6 +316,43 @@ describe("generateAssistantTurn", () => {
     expect(result.criticVerdict?.questionWorthAsking).toBe(false);
     expect(result.criticVerdict?.timingVerdict).toBe("skip");
     expect(result.reply).not.toMatch(/final wrap-up|double-check in production/i);
+  });
+
+  it("closes cleanly when the candidate already declared implementation done and delivered a final wrap-up", async () => {
+    process.env.GEMINI_API_KEY = "fake-key";
+    process.env.LLM_PROVIDER = "gemini";
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [{ text: "Thanks for the clear summary. Since you've covered complexity and validation well, feel free to proceed with your implementation or any final thoughts you want to share." }],
+            },
+          },
+        ],
+      }),
+    } as Response) as typeof fetch;
+
+    const result = await generateAssistantTurn({
+      mode: "CODING",
+      questionTitle: "Two Sum",
+      questionPrompt: "Return indices of two numbers that add up to target.",
+      currentStage: "WRAP_UP",
+      recentTranscripts: [
+        { speaker: "USER", text: "I am done with my implementation" },
+        {
+          speaker: "USER",
+          text: "I iterate through the array once and use a hash map to store previously seen values and their indices. The tradeoff is extra memory for O(n) time. Time complexity is O(n) and space complexity is O(n).",
+        },
+      ],
+      latestExecutionRun: { status: "PASSED" },
+    });
+
+    expect(["gemini", "fallback"]).toContain(result.source);
+    expect(["close_topic", "end_interview"]).toContain(result.decision?.action);
+    expect(result.reply).not.toMatch(/proceed with your implementation|keep moving/i);
+    expect(result.reply).toMatch(/done here|close|stop/i);
   });
 
   it("turns repeated wrap-up keep-going language into an explicit closure", async () => {

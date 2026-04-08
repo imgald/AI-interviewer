@@ -198,6 +198,14 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                             value={String(detail.sessionSummary.latestTrajectory?.candidateTrajectory ?? "unknown")}
                           />
                           <MetricCard
+                            label="DNA Mode"
+                            value={String(detail.sessionSummary.latestCandidateDna?.recommendedMode ?? "unknown")}
+                          />
+                          <MetricCard
+                            label="Shadow Policy"
+                            value={String(detail.sessionSummary.latestShadowPolicy?.archetype ?? "unknown")}
+                          />
+                          <MetricCard
                             label="Timing Quality"
                             value={String(detail.sessionSummary.sessionCritic?.timingQuality ?? "unknown")}
                           />
@@ -665,6 +673,95 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                             </>
                           ) : (
                             <p style={{ margin: "10px 0 0", color: "var(--muted)" }}>No session-level critic summary yet.</p>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {detail.sessionSummary ? (
+                      <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+                        <div style={panelStyle}>
+                          <strong>Latest Candidate DNA</strong>
+                          {detail.sessionSummary.latestCandidateDna ? (
+                            <>
+                              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", marginTop: 12, marginBottom: 12 }}>
+                                <MetricCard label="Mode" value={String(detail.sessionSummary.latestCandidateDna.recommendedMode ?? "unknown")} />
+                                <MetricCard
+                                  label="Reasoning"
+                                  value={String(asPercent(detail.sessionSummary.latestCandidateDna.vector, "reasoning"))}
+                                />
+                                <MetricCard
+                                  label="Implementation"
+                                  value={String(asPercent(detail.sessionSummary.latestCandidateDna.vector, "implementation"))}
+                                />
+                                <MetricCard
+                                  label="Coachability"
+                                  value={String(asPercent(detail.sessionSummary.latestCandidateDna.vector, "coachability"))}
+                                />
+                                <MetricCard
+                                  label="Independence"
+                                  value={String(asPercent(detail.sessionSummary.latestCandidateDna.vector, "independence"))}
+                                />
+                              </div>
+                              {Array.isArray(detail.sessionSummary.latestCandidateDna.dominantTraits) &&
+                              detail.sessionSummary.latestCandidateDna.dominantTraits.length > 0 ? (
+                                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                                  {detail.sessionSummary.latestCandidateDna.dominantTraits.map((trait) => (
+                                    <span key={`admin-dna-trait-${trait}`} style={stagePillStyle}>
+                                      {String(trait)}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
+                              <dl style={definitionListStyle}>
+                                {Object.entries(detail.sessionSummary.latestCandidateDna).map(([key, value]) => (
+                                  <div key={key} style={definitionRowStyle}>
+                                    <dt style={definitionTermStyle}>{formatLabel(key)}</dt>
+                                    <dd style={definitionValueStyle}>
+                                      {Array.isArray(value) ? value.join(", ") : typeof value === "object" && value !== null ? JSON.stringify(value) : String(value)}
+                                    </dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            </>
+                          ) : (
+                            <p style={{ margin: "10px 0 0", color: "var(--muted)" }}>No candidate DNA snapshot recorded yet.</p>
+                          )}
+                        </div>
+
+                        <div style={panelStyle}>
+                          <strong>Latest Shadow Policy</strong>
+                          {detail.sessionSummary.latestShadowPolicy ? (
+                            <>
+                              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", marginTop: 12, marginBottom: 12 }}>
+                                <MetricCard label="Archetype" value={String(detail.sessionSummary.latestShadowPolicy.archetype ?? "unknown")} />
+                                <MetricCard label="Action" value={String(detail.sessionSummary.latestShadowPolicy.action ?? "unknown")} />
+                                <MetricCard label="Target" value={String(detail.sessionSummary.latestShadowPolicy.target ?? "unknown")} />
+                                <MetricCard label="Pressure" value={String(detail.sessionSummary.latestShadowPolicy.pressure ?? "unknown")} />
+                                <MetricCard label="Timing" value={String(detail.sessionSummary.latestShadowPolicy.timing ?? "unknown")} />
+                              </div>
+                              {Array.isArray(detail.sessionSummary.latestShadowPolicy.diff) &&
+                              detail.sessionSummary.latestShadowPolicy.diff.length > 0 ? (
+                                <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                                  <strong>Diff Against Actual Policy</strong>
+                                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                    {detail.sessionSummary.latestShadowPolicy.diff.map((item) => (
+                                      <span key={`admin-shadow-diff-${item}`} style={stagePillStyle}>
+                                        {String(item)}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null}
+                              {detail.sessionSummary.latestShadowPolicy.reason ? (
+                                <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+                                  <strong>Shadow Reason</strong>
+                                  <div style={panelStyle}>{String(detail.sessionSummary.latestShadowPolicy.reason)}</div>
+                                </div>
+                              ) : null}
+                            </>
+                          ) : (
+                            <p style={{ margin: "10px 0 0", color: "var(--muted)" }}>No shadow policy evaluation recorded yet.</p>
                           )}
                         </div>
                       </div>
@@ -1213,6 +1310,14 @@ function formatLabel(value: string) {
   return value.replace(/([A-Z])/g, " $1").replaceAll("_", " ").trim();
 }
 
+function asPercent(vector: unknown, key: string) {
+  if (typeof vector !== "object" || vector === null) {
+    return "unknown";
+  }
+
+  const value = (vector as Record<string, unknown>)[key];
+  return typeof value === "number" ? `${Math.round(value * 100)}%` : "unknown";
+}
 
 
 

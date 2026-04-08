@@ -58,6 +58,8 @@ export type SessionSummary = {
   latestDecision: Record<string, unknown> | null;
   latestIntent: Record<string, unknown> | null;
   latestTrajectory: Record<string, unknown> | null;
+  latestCandidateDna: Record<string, unknown> | null;
+  latestShadowPolicy: Record<string, unknown> | null;
   latestCritic: Record<string, unknown> | null;
   sessionCritic: SessionCriticSummary | null;
   latentCalibration: LatentCalibration | null;
@@ -316,7 +318,15 @@ function summarizeSession(session: {
   );
   const latestCriticEvent = [...ordered].reverse().find((event) => event.eventType === "CRITIC_VERDICT_RECORDED");
   const latestCodeRunEvent = [...ordered].reverse().find((event) => event.eventType === "CODE_RUN_COMPLETED");
+  const latestCandidateDnaEvent = [...ordered].reverse().find((event) => event.eventType === "CANDIDATE_DNA_RECORDED");
+  const latestShadowPolicyEvent = [...ordered].reverse().find((event) => event.eventType === "SHADOW_POLICY_EVALUATED");
   const latestCritic = latestCriticEvent ? asRecord(asRecord(latestCriticEvent.payloadJson).criticVerdict) : null;
+  const latestCandidateDna = latestCandidateDnaEvent
+    ? asRecord(asRecord(latestCandidateDnaEvent.payloadJson).candidateDna)
+    : null;
+  const latestShadowPolicy = latestShadowPolicyEvent
+    ? asRecord(asRecord(latestShadowPolicyEvent.payloadJson).shadowPolicy)
+    : null;
   const hintCount = ordered.filter((event) => event.eventType === "HINT_SERVED").length;
   const failedRunCount = ordered.filter((event) => {
     if (event.eventType !== "CODE_RUN_COMPLETED") {
@@ -354,6 +364,8 @@ function summarizeSession(session: {
     latestDecision: snapshotState.latestDecision,
     latestIntent: snapshotState.latestIntent,
     latestTrajectory: snapshotState.latestTrajectory,
+    latestCandidateDna,
+    latestShadowPolicy,
     latestCritic,
     sessionCritic,
     latentCalibration: snapshotState.latentCalibration,
@@ -385,6 +397,8 @@ function buildSessionTimeline(
         "DECISION_RECORDED",
         "INTENT_SNAPSHOT_RECORDED",
         "TRAJECTORY_SNAPSHOT_RECORDED",
+        "CANDIDATE_DNA_RECORDED",
+        "SHADOW_POLICY_EVALUATED",
         "CRITIC_VERDICT_RECORDED",
         "HINT_SERVED",
         "CODE_RUN_COMPLETED",
@@ -719,6 +733,21 @@ export function buildSessionEventDescription(eventType: string, payloadJson: unk
   if (eventType === "TRAJECTORY_SNAPSHOT_RECORDED") {
     const trajectory = asRecord(payload.trajectory);
     return `Trajectory estimate: ${stringOrFallback(trajectory.candidateTrajectory, "unknown trajectory")} with ${stringOrFallback(trajectory.bestIntervention, "unknown intervention")} as the best intervention and interruption=${stringOrFallback(trajectory.interruptionCost, "unknown")}.`;
+  }
+
+  if (eventType === "CANDIDATE_DNA_RECORDED") {
+    const dna = asRecord(payload.candidateDna);
+    const mode = stringOrFallback(dna.recommendedMode, "unknown");
+    const traits = Array.isArray(dna.dominantTraits) ? dna.dominantTraits.join(", ") : "no traits";
+    return `Candidate DNA recorded: mode=${mode}; traits=${traits}.`;
+  }
+
+  if (eventType === "SHADOW_POLICY_EVALUATED") {
+    const shadow = asRecord(payload.shadowPolicy);
+    const archetype = stringOrFallback(shadow.archetype, "unknown");
+    const action = stringOrFallback(shadow.action, "unknown");
+    const diff = Array.isArray(shadow.diff) ? shadow.diff.join(", ") : "none";
+    return `Shadow policy evaluated: ${archetype} would choose ${action}; diff=${diff}.`;
   }
 
   if (eventType === "CRITIC_VERDICT_RECORDED") {
