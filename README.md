@@ -1289,6 +1289,106 @@ Likely new or heavily adapted:
   - diagram-first or outline-first
   - not code-editor-first
 
+##### System Design Interviewer Execution Roadmap (v1)
+
+Execution principle:
+- maximize reuse of the existing coding interviewer control plane
+- only add mode-aware adapters where system-design semantics are truly different
+- keep decision/reward/report explainability unchanged (`snapshot -> decision -> reward -> report`)
+
+Phase sequence:
+
+1. Phase 0 (`P0`) - Mode switch foundation
+- wire `SYSTEM_DESIGN` mode end-to-end from setup -> session -> assistant pipeline
+- verify mode is persisted and visible in runtime/session state
+- DoD:
+  - setup can start system-design sessions
+  - session records show `mode=SYSTEM_DESIGN`
+  - assistant pipeline branches on mode without coding regression
+
+2. Phase 1 (`P0`) - Six-stage state machine
+- add canonical design stages:
+  - `REQUIREMENTS`
+  - `CAPACITY`
+  - `HIGH_LEVEL`
+  - `DEEP_DIVE`
+  - `REFINEMENT`
+  - `WRAP_UP`
+- add stage inference + transition guard (forbid deep-dive before capacity pass)
+- DoD:
+  - stage progression is visible/auditable in `/admin`
+  - flow cannot skip capacity into deep dive
+  - stage reasoning is deterministic and explainable
+
+3. Phase 2 (`P0`) - Signal extractor extension
+- add design-specific signals:
+  - `requirement_missing`
+  - `capacity_missing`
+  - `tradeoff_missed`
+  - `spof_missed`
+  - `bottleneck_unexamined`
+- emit design signal snapshots with evidence references
+- DoD:
+  - all five signals can be detected and tracked over turns
+  - each signal has explicit evidence
+  - signal state transitions are visible in `/admin`
+
+4. Phase 3 (`P0`) - Decision engine extension
+- add design actions:
+  - `ASK_REQUIREMENT`
+  - `ASK_CAPACITY`
+  - `PROBE_TRADEOFF`
+  - `CHALLENGE_SPOF`
+  - `ZOOM_IN`
+- keep one unified score model (`argmax`) and add system-design boosts/penalties
+- add `No Code Invariant` in system-design mode (forbid coding-implementation prompts)
+- DoD:
+  - interviewer actively asks for QPS/scale when missing
+  - interviewer challenges hand-wavy tradeoffs and SPOF gaps
+  - decisions remain score-decomposed and auditable
+
+5. Phase 4 (`P1`) - Reward extension
+- extend reward for system-design quality:
+  - reward risk identification and tradeoff depth
+  - penalize hand-waving
+- keep turn-level attribution
+- DoD:
+  - system can distinguish deep design answers vs generic answers
+  - reward outcomes are explainable by turn and evidence
+
+6. Phase 5 (`P1`) - Report and DNA extension
+- add design DNA dimensions:
+  - requirement clarity
+  - capacity instinct
+  - tradeoff depth
+  - reliability awareness
+  - bottleneck sensitivity
+- pin report scores to snapshot/turn evidence
+- DoD:
+  - report remains evidence-backed and auditable
+  - strengths/weaknesses/recommendation are grounded in design evidence
+
+7. Phase 6 (`P1.5`) - Regression lab
+- add system-design scenarios:
+  - no-estimation candidate
+  - hand-wave candidate
+  - strong tradeoff candidate
+- compare decision timeline + score diff + reward diff across policies
+- DoD:
+  - policy behavior differences are observable and stable
+  - no major behavior regression across scenarios
+
+8. Phase 7 (`P2`, deferred) - Whiteboard integration
+- add drawing UI as weak auxiliary signal only
+- keep whiteboard telemetry outside core truth/decision invariants
+- DoD:
+  - whiteboard is available as UX aid
+  - core decision integrity is unchanged
+
+First implementation steps:
+- Commit 1: system-design six-stage state machine (`stages.ts` + guards/tests)
+- Commit 2: five design signals (`signal_extractor.ts` + snapshots/tests)
+
 #### If We Expand to ML System Design
 
 Everything above for system design still applies, plus ML-specific semantic layers:
