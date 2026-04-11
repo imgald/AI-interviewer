@@ -26,122 +26,19 @@ This repo now has a working MVP-plus skeleton with:
 
 ## Recent Progress
 
-- Closed `Phase 5: Policy Optimization Lab`:
-  - policy regression now runs deterministic multi-turn micro-simulations with decision/reward timelines
-  - scenario-level comparison includes both score spread and reward spread
-  - added golden scenarios for `overconfident_wrong_answer` and `perfect_flow`
-  - `/admin` policy lab now shows reward gaps plus reward-driven tuning suggestions
-- Added stronger coding interview policy orchestration:
-  - current stage is derived from transcripts, session events, and the latest code run
-  - assistant turns receive explicit stage context plus policy context
-  - each stage has an explicit exit checklist
-  - hints now escalate by recent hint count, stage stall, and repeated failed runs
-  - prompt strategy can shift from `OPEN_ENDED` to `GUIDED` to `CONSTRAINED`
-  - `STAGE_ADVANCED` is only recorded when the stage actually changes
-- Improved the interview room so it feels more like a real conversation:
-  - streaming AI replies over `SSE`
-  - continuous listening mode
-  - candidate speech interrupts AI playback and generation
-  - adaptive silence thresholds for auto-submit
-  - short interruption phrases like `wait` and `hold on` are ignored instead of being treated as full candidate turns
-  - spoken candidate turns can be refined through a dedicated STT provider before being sent to the interviewer
-  - when a dedicated STT provider is configured, the room can prefer provider-led speech handling over browser transcript timing
-  - provider preview drafts can appear during speech, with final provider transcription used for the committed candidate turn
-- Added session-level cost controls and observability:
-  - `low-cost mode` can be enabled from setup
-  - LLM context is trimmed more aggressively in low-cost mode
-  - provider preview and STT calls are throttled more aggressively in low-cost mode
-  - per-session `LLM_USAGE_RECORDED` and `STT_USAGE_RECORDED` events now produce rough cost estimates
-  - interview room surfaces current LLM/STT call counts and estimated total cost
-- Replaced the static code panel with a real Monaco editor
-- Added session code execution flow:
-  - `CodeSnapshot` records are created on run
-  - `ExecutionRun` records are persisted
-  - session timeline includes code-run-related events
-- Added multi-provider LLM support for interviewer turns:
-  - `Gemini`
-  - `OpenAI`
-  - local `fallback`
-- Improved provider fallback visibility and resilience:
-  - Gemini and OpenAI failures now surface more clearly in development logs
-  - fallback turns can carry provider-failure context back to the room
-  - the interview room now shows the latest AI source (`gemini`, `openai`, or `fallback`)
-  - Gemini turns now record `LLM_USAGE_RECORDED` events too, even when cost is tracked as unknown
-- Improved dedicated STT provider handling:
-  - OpenAI and AssemblyAI now share a common STT provider abstraction
-  - dedicated STT failures are classified into classes like `quota`, `auth`, `model`, `network`, and `timeout`
-  - quota-like failures now auto-disable dedicated STT for the current room and fall back to browser transcription
-  - voice diagnostics now include richer browser preflight and live microphone-level visibility
-- Improved interviewer quality with a shared interviewer-skills layer:
-  - warmer but still professional tone
-  - clearer pacing
-  - better follow-up discipline
-  - less repetitive phrasing
-- Improved `/admin` unified operations feed:
-  - richer descriptions for session lifecycle events
-  - readable stage transition descriptions
-  - persona and session activity rendered in one timeline
-- Expanded tests around:
-  - full-route and assistant-turn regressions now run cleanly in local Vitest again
-  - assistant stage inference
-  - assistant-turn generation and stage transitions
-  - streaming routes
-  - voice turn-taking policies
-  - admin feed event descriptions
-- Added evaluation/report v0:
-  - `POST /api/sessions/:id/report` generates a structured feedback summary
-  - reports persist to `Evaluation`, `EvaluationDimensionScore`, and `FeedbackReport`
-  - report generation now emits explicit lifecycle events
-  - `/report/[id]` provides a standalone report page
-  - the report page includes a lightweight replay of stage transitions, hints, code runs, and key turns
+- System design interviewer `Phase 0/1/2` is now completed in the current roadmap.
+- Stage control is mode-aware, and system design now includes API contract gating + on-demand capacity gating.
+- Design signals (`requirements/capacity/tradeoff/SPOF/bottleneck`) are extracted with evidence refs and visible in admin snapshots.
+- Full detailed log of recent changes moved to:
+  - [docs/changelog/2026-04-11-progress-archive.md](docs/changelog/2026-04-11-progress-archive.md)
 
 ## Latest Interviewer Quality Upgrades
 
-- Added signal_extractor as a perception layer with provider-backed structured observation first and heuristic fallback second.
-- Added decision_engine as a candidate-state-driven interviewer control layer, so turns are chosen from candidate signals plus stage and code-run evidence.
-- Gemini/OpenAI replies are now explicitly steered by the decision engine, shaped by a dedicated reply strategy layer, and post-processed to fall back to the required decision question when a model reply is too generic.
-- provider prompts now receive structured candidate issues, issue groups, issue-specific instructions, and expected-answer contracts so Gemini/OpenAI can act more like execution layers than free-form chat models.
-- Text-provider fallback is now an explicit sequence: preferred provider -> secondary provider -> local fallback.
-- Added `reply_strategy.ts` so decision actions such as `probe_tradeoff`, `probe_correctness`, and `hold_and_listen` map to more interviewer-like wording across provider-backed and local fallback turns.
-- decision_engine v2 now distinguishes between:
-  - probing tradeoffs when the algorithm choice is weak
-  - probing correctness when implementation looks close but reasoning is still thin
-  - holding the floor and lightly steering when the candidate is progressing in a structured way
-- /admin now exposes latest session stage, latest candidate state, latest interviewer decision, and a dedicated session-state timeline.
-- /report/[id] now shares the same evidence backbone as /admin, including signal snapshots, interviewer decisions, hints, stage transitions, and code-run outcomes.
-- decision_engine now consumes fine-grained structured evidence directly, so issue classes like invariant gaps, narrow boundary coverage, and shallow tradeoff analysis can trigger more surgical follow-up questions.
-- memory_ledger now tracks `answeredTargets` and `collectedEvidence`, so the interviewer can tell the difference between "I already asked this" and "the candidate already answered this."
-- Added `critic.ts` as a lightweight turn-review layer after generation, with structured verdicts for `accept`, `rewrite`, `move_on`, and `move_to_implementation`.
-- Added `pacing.ts` as an explicit flow-control layer that scores whether a question is still worth asking now, whether implementation should start, and whether testing/complexity evidence is already sufficient.
-- decision_engine decisions now carry a `pressure` level (`soft`, `neutral`, `challenging`, `surgical`) so interviewer turns can vary not just by target but by how hard they should press.
-- Critic verdicts now also include `questionWorthAsking` and `worthReason`, so the system can distinguish between “bad wording” and “wrong timing”.
-- Critic verdicts are now written into session events and surfaced in `/admin` and `/report` replay so reviewer pressure, specificity, and repetition handling are inspectable.
-- Gemini/OpenAI now have a low-cost rewrite pass for weak turns before falling back to rule-based rewrites, which reduces generic follow-ups and repeated answered targets.
-- Streaming assistant turns now preserve spoken/live wording as the authoritative final transcript when a post-stream critic rewrite would materially change the interviewer intent, which keeps TTS/live draft output aligned with the persisted transcript.
-- decision_engine now avoids immediately repeating `testing`, `edge_case`, `complexity`, and `tradeoff` targets once the candidate has already supplied the relevant evidence, and instead moves the interview forward.
-- interviewer closure logic now explicitly models `move_to_wrap_up`, `close_topic`, and `end_interview`, so once evidence is saturated the system stops saying `Keep going` and closes the topic cleanly.
-- critic verdicts now track `evidenceAlreadySaturated` and `recommendedClosure`, so repeated wrap-up, summary, testing, and complexity loops can be converted into explicit closure turns instead of more probing.
-- Added `interviewer_intent.ts` so each turn can explicitly model why the interviewer is acting now (`validate`, `probe`, `guide`, `unblock`, `advance`, `close`) instead of only what action it takes.
-- Added `trajectory_estimator.ts` so interviewer control can reason about whether the candidate is self-recovering, plateauing, stuck, or steadily progressing before deciding to intervene.
-- decision_engine v3 now consumes `intent + trajectory + pass conditions + pacing`, pushing the interviewer from purely state-driven behavior toward intent-driven, trajectory-aware behavior.
-- Added pass-condition/topic gates for implementation, complexity, testing, and wrap-up so stage exits are backed by explicit completion criteria instead of only heuristics.
-- Intent and trajectory snapshots are now persisted and loaded through the snapshot-first pipeline, so `/admin` and `/report` can explain not just what happened, but why the interviewer chose that path.
-- Added `session_critic.ts` as a session-level meta-review layer, scoring redundancy, interruption quality, pressure balance, flow preservation, timing quality, and closure quality across the whole interview.
-- `/admin` and `/report` now surface latest interviewer intent, latest trajectory estimate, and a session-level critic summary in addition to turn-level decision and critic metadata.
-- Candidate-state and interviewer-decision snapshots now have dedicated persistence tables plus snapshot-first read helpers, so `/admin` and `/report` can load canonical state without replaying the full event stream at runtime.
-- Added tests for signal extraction, decision logic, evidence-based reporting, reply strategy shaping, provider compliance handling, and provider fallback ordering.
-- signal extraction now records finer correctness failure patterns such as missing proof sketches, imprecise expected outputs for test cases, shallow tradeoff analysis, and tradeoffs that are not justified against the actual constraints.
-- /admin and /report now group observed candidate issues by Correctness, Testing, Complexity, and Debugging so interviewer quality is easier to inspect at a glance.
-- /admin and /report replay now surface unresolved issues, missing evidence, answered targets, collected evidence, and the current evidence focus so interviewer pacing is easier to debug visually.
-- `/admin` and `/report` now also surface the latest interviewer `pressure`, critic `Worth Asking`, and critic `Worth Reason` as top-level summary cards instead of hiding them only in replay payloads.
-- `/report/[id]` stage replay is now grouped by stage from canonical snapshots plus event evidence, which makes product-facing replay much closer to a real interview debrief.
-- Added `hinting_ledger.ts` so the interviewer can classify hint granularity, rescue mode, and hint cost instead of only recording that a hint happened.
-- decision_engine hint actions now carry `rescueMode`, `hintGranularity`, and `hintCost`, so rescue behavior is explicit rather than buried in generic hint metadata.
-- report generation now aggregates hint cost, strongest hint level, rescue-mode mix, efficiency score, and coachability so feedback reflects not just whether help happened, but how much help the candidate needed and how efficiently the candidate converted signals into evidence.
-- report generation now produces deeper evidence traces, execution-aware evaluation signals, candidate DNA, moments of truth, and rubric summaries so the final report reads more like a real interview debrief than a generic AI recap.
-- `/admin` latest-session summary now derives current stage and stage journey from canonical snapshots instead of replaying events to rebuild live state.
-- Added a hard session budget guardrail at `$2.00` estimated usage: assistant-turn routes now emit `SESSION_BUDGET_EXCEEDED`, end the interview, and return a clean budget-closure reply instead of continuing indefinitely.
-- Code execution now supports a stronger sandbox path with optional Docker isolation (`CODE_SANDBOX_DRIVER=docker`) plus stricter local timeout cleanup to kill runaway process trees.
+- Decision flow uses `signals + intent + trajectory + pass conditions + pacing`.
+- Snapshot-first admin/report pipeline is the source of truth for replay and evidence.
+- Turn quality control includes critic pass, pressure-aware decisioning, and closure semantics.
+- Detailed upgrade history is archived in:
+  - [docs/changelog/2026-04-11-progress-archive.md](docs/changelog/2026-04-11-progress-archive.md)
 
 ## What Works Today
 
