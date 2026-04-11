@@ -1,5 +1,5 @@
 ﻿import { describe, expect, it } from "vitest";
-import { resolveCodingInterviewPolicy } from "@/lib/assistant/policy";
+import { enforceSystemDesignNoCodeInvariant, resolveCodingInterviewPolicy } from "@/lib/assistant/policy";
 import { generateSessionReport } from "@/lib/evaluation/report";
 
 describe("coding interview policy", () => {
@@ -85,6 +85,31 @@ describe("coding interview policy", () => {
     expect(policy.shouldServeHint).toBe(true);
     expect(policy.hintLevel).toBe("STRONG");
     expect(policy.escalationReason).toBe("multiple_recent_failures");
+  });
+
+  it("enforces no-code invariant in system design mode", () => {
+    const guarded = enforceSystemDesignNoCodeInvariant({
+      mode: "SYSTEM_DESIGN",
+      action: "move_stage",
+      target: "implementation",
+      question: "Please implement the write path and run tests.",
+    });
+
+    expect(guarded.action).toBe("ask_followup");
+    expect(guarded.target).toBe("approach");
+    expect(guarded.question).toMatch(/design level|tradeoff|reliability/i);
+  });
+
+  it("does not alter coding mode actions", () => {
+    const guarded = enforceSystemDesignNoCodeInvariant({
+      mode: "CODING",
+      action: "move_stage",
+      target: "implementation",
+      question: "Please implement the write path and run tests.",
+    });
+
+    expect(guarded.action).toBe("move_stage");
+    expect(guarded.target).toBe("implementation");
   });
 });
 

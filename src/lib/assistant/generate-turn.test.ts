@@ -49,6 +49,9 @@ describe("generateAssistantTurn", () => {
 
     expect(result.source).toBe("fallback");
     expect(result.reply.length).toBeGreaterThan(0);
+    expect(result.policyAction).toBe("ASK_REQUIREMENT");
+    expect(result.reply).toMatch(/requirements|scope|non-functional|scale/i);
+    expect(result.reply).not.toMatch(/implement|write code|run tests/i);
   });
 
   it("asks about debugging after an execution error", async () => {

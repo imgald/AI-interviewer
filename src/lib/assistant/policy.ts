@@ -26,6 +26,16 @@ export type CodingInterviewPolicyAction =
   | "WRAP_UP"
   | "SERVE_HINT";
 
+export type SystemDesignPolicyAction =
+  | "ASK_REQUIREMENT"
+  | "ASK_CAPACITY"
+  | "PROBE_TRADEOFF"
+  | "CHALLENGE_SPOF"
+  | "ZOOM_IN"
+  | "WRAP_UP";
+
+export type InterviewPolicyAction = CodingInterviewPolicyAction | SystemDesignPolicyAction;
+
 export type CodingInterviewHintStyle =
   | "CLARIFYING_NUDGE"
   | "APPROACH_NUDGE"
@@ -55,6 +65,35 @@ export type CodingInterviewPolicy = {
   escalationReason?: string;
   reason: string;
 };
+
+export function enforceSystemDesignNoCodeInvariant(input: {
+  mode: "CODING" | "SYSTEM_DESIGN";
+  action: string;
+  target: string;
+  question: string;
+}) {
+  if (input.mode !== "SYSTEM_DESIGN") {
+    return input;
+  }
+
+  const normalizedQuestion = input.question.toLowerCase();
+  const codingLeakDetected =
+    /(write|implement|code|compile|run tests?|syntax|loop|pointer|array index|debug runtime)/.test(normalizedQuestion) ||
+    input.target === "implementation" ||
+    input.action === "move_stage";
+
+  if (!codingLeakDetected) {
+    return input;
+  }
+
+  return {
+    ...input,
+    action: "ask_followup",
+    target: "approach",
+    question:
+      "Stay at the design level only. Clarify one architecture decision, its tradeoff, and the reliability impact before we move forward.",
+  };
+}
 
 export function resolveCodingInterviewPolicy(input: {
   currentStage: CodingInterviewStage;

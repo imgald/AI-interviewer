@@ -354,6 +354,26 @@ export function makeCandidateDecision(input: {
     }
 
     if (conversationHealth.mode === "RESCUE") {
+      if (recentEchoEvents <= 1 && signals.echoLikely) {
+        return attachIntentTrajectory({
+          action: "ask_for_clarification",
+          target: "reasoning",
+          question:
+            "Reset format once to avoid echoing: answer in exactly two sentences, directly. Sentence 1: core algorithm step. Sentence 2: exact time and space complexity.",
+          reason:
+            "Conversation-health entered rescue mode, but with only a single echo event we should first use a strict clarification format before escalating to hints.",
+          confidence: 0.9,
+          echoRecoveryMode: "constrained_prompt",
+          echoRecoveryAttempt: echoRecoveryAttempt + 1,
+          targetCodeLine: "one concrete algorithm step and one exact complexity line without repeating interviewer wording",
+          specificIssue: "A single high-confidence echo was detected; enforce a stricter output format before giving solution scaffolding.",
+          expectedAnswer:
+            "Exactly two direct sentences with one concrete step and one explicit complexity line.",
+          suggestedStage: "APPROACH_DISCUSSION",
+          policyAction: policy.recommendedAction,
+        });
+      }
+
       return attachIntentTrajectory({
         action: "give_hint",
         target: "reasoning",
@@ -1459,7 +1479,14 @@ function applyUnifiedDecisionScore(
     Number.isFinite(proposalScore.totalScore) &&
     Number.isFinite(best.totalScore) &&
     best.totalScore - proposalScore.totalScore < convergenceThreshold;
-  const chosenFamily = shouldKeepProposal ? proposalFamily : rawWinner;
+  const shouldKeepEchoRecoveryProposal = Boolean(decision.echoRecoveryMode) && rawWinner !== proposalFamily;
+  const shouldPreventHoldOverride =
+    rawWinner === "Hold" &&
+    proposalFamily !== "Hold";
+  const chosenFamily =
+    shouldKeepProposal || shouldKeepEchoRecoveryProposal || shouldPreventHoldOverride
+      ? proposalFamily
+      : rawWinner;
   const chosenScore = scoreTable.find((item) => item.action === chosenFamily) ?? best;
   const familyAlignedDecision = adaptDecisionToUnifiedAction(decision, chosenFamily, context.currentStage);
   const effectiveTieBreaker = shouldKeepProposal

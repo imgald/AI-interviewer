@@ -4,9 +4,10 @@ import { makeCandidateDecision, type CandidateDecision } from "@/lib/assistant/d
 import type { HintGranularity, RescueMode } from "@/lib/assistant/hinting_ledger";
 import type { HintTier, HintInitiator, HintRequestTiming, MomentumAtHint } from "@/lib/assistant/hint_strategy";
 import {
+  enforceSystemDesignNoCodeInvariant,
   formatCodingInterviewPolicy,
   resolveCodingInterviewPolicy,
-  type CodingInterviewPolicyAction,
+  type InterviewPolicyAction,
   type CodingInterviewHintLevel,
   type CodingInterviewHintStyle,
 } from "@/lib/assistant/policy";
@@ -32,9 +33,12 @@ import {
   inferSuggestedCodingStage,
   inferSuggestedSystemDesignStage,
   isCodingInterviewStage,
+  isSystemDesignStage,
   stageGuidance,
   type CodingInterviewStage,
+  type SystemDesignStage,
 } from "@/lib/assistant/stages";
+import { makeSystemDesignDecision, type SystemDesignDecision } from "@/lib/assistant/system_design_decision";
 import { estimateOpenAiTextCost, estimateTokens } from "@/lib/usage/cost";
 import { assessSessionBudget } from "@/lib/usage/budget";
 import { resolveAssistantLeadInDelayMs } from "@/lib/voice/turn-taking";
@@ -76,7 +80,7 @@ type GenerateAssistantTurnResult = {
   suggestedStage?: string;
   source: "fallback" | "openai" | "gemini";
   model?: string;
-  policyAction?: CodingInterviewPolicyAction;
+  policyAction?: InterviewPolicyAction;
   policyReason?: string;
   hintServed?: boolean;
   hintStyle?: CodingInterviewHintStyle;
@@ -151,8 +155,32 @@ export async function generateAssistantTurn(
 async function generateSystemDesignAssistantTurn(
   input: GenerateAssistantTurnInput,
 ): Promise<GenerateAssistantTurnResult> {
-  // Phase 0 routing scaffold: reuse coding interviewer behavior until dedicated SD policy lands.
-  return generateCodingAssistantTurn(input);
+  const currentStage = normalizeSystemDesignStage(input.currentStage);
+  const signals = await extractCandidateSignalsSmart({
+    currentStage: "PROBLEM_UNDERSTANDING",
+    mode: "SYSTEM_DESIGN",
+    recentTranscripts: input.recentTranscripts,
+    recentEvents: input.recentEvents,
+    latestExecutionRun: input.latestExecutionRun,
+  });
+  const decision = buildSystemDesignDecision(signals, currentStage);
+  const reply = buildSystemDesignFallbackReply(decision, findLatestTurn(input.recentTranscripts, "AI") ?? undefined);
+  const suggestedStage = inferSuggestedSystemDesignStage({
+    currentStage: currentStage,
+    latestUserTurn: findLatestTurn(input.recentTranscripts, "USER"),
+    reply,
+    events: input.recentEvents,
+  });
+
+  return {
+    reply: finalizeReply(reply),
+    suggestedStage,
+    source: "fallback",
+    signals,
+    decision,
+    policyAction: decision.systemDesignActionType ?? decision.policyAction,
+    policyReason: decision.reason,
+  };
 }
 
 async function generateCodingAssistantTurn(
@@ -235,8 +263,55 @@ async function* streamSystemDesignAssistantTurn(
   input: GenerateAssistantTurnInput,
   options?: { signal?: AbortSignal },
 ): AsyncGenerator<StreamingAssistantTurnChunk> {
-  // Phase 0 routing scaffold: reuse coding interviewer behavior until dedicated SD policy lands.
-  yield* streamCodingAssistantTurn(input, options);
+  const currentStage = normalizeSystemDesignStage(input.currentStage);
+  const signals = await extractCandidateSignalsSmart({
+    currentStage: "PROBLEM_UNDERSTANDING",
+    mode: "SYSTEM_DESIGN",
+    recentTranscripts: input.recentTranscripts,
+    recentEvents: input.recentEvents,
+    latestExecutionRun: input.latestExecutionRun,
+  });
+  const decision = buildSystemDesignDecision(signals, currentStage);
+  const reply = buildSystemDesignFallbackReply(decision, findLatestTurn(input.recentTranscripts, "AI") ?? undefined);
+  const suggestedStage = inferSuggestedSystemDesignStage({
+    currentStage: currentStage,
+    latestUserTurn: findLatestTurn(input.recentTranscripts, "USER"),
+    reply,
+    events: input.recentEvents,
+  });
+
+  yield {
+    meta: {
+      thinkingDelayMs: resolveAssistantLeadInDelayMs({
+        action: decision.action,
+        pressure: decision.pressure,
+        lowCostMode: input.lowCostMode,
+      }),
+      action: decision.action,
+      pressure: decision.pressure,
+      decisionComplexity: decision.totalScore,
+      speechCommitMode: "commit_only",
+    },
+  };
+
+  for (const chunk of chunkText(reply)) {
+    if (options?.signal?.aborted) {
+      return;
+    }
+    yield { textDelta: chunk };
+  }
+
+  yield {
+    final: {
+      reply: finalizeReply(reply),
+      suggestedStage,
+      source: "fallback",
+      signals,
+      decision,
+      policyAction: decision.systemDesignActionType ?? decision.policyAction,
+      policyReason: decision.reason,
+    },
+  };
 }
 
 async function* streamCodingAssistantTurn(
@@ -1842,6 +1917,43 @@ function normalizeStage(stage: string | null | undefined): CodingInterviewStage 
 
 function normalizeInterviewMode(mode: string | null | undefined): InterviewMode {
   return mode === "SYSTEM_DESIGN" ? "SYSTEM_DESIGN" : "CODING";
+}
+
+function normalizeSystemDesignStage(stage: string | null | undefined): SystemDesignStage {
+  return isSystemDesignStage(stage) ? stage : "REQUIREMENTS";
+}
+
+function buildSystemDesignDecision(
+  signals: CandidateSignalSnapshot,
+  currentStage: SystemDesignStage,
+): SystemDesignDecision {
+  const baseDecision = makeSystemDesignDecision({
+    currentStage,
+    signals,
+  });
+  const guarded = enforceSystemDesignNoCodeInvariant({
+    mode: "SYSTEM_DESIGN",
+    action: baseDecision.action,
+    target: baseDecision.target,
+    question: baseDecision.question,
+  });
+
+  if (guarded.action === baseDecision.action && guarded.target === baseDecision.target && guarded.question === baseDecision.question) {
+    return baseDecision;
+  }
+
+  return {
+    ...baseDecision,
+    action: guarded.action as CandidateDecision["action"],
+    target: guarded.target as CandidateDecision["target"],
+    question: guarded.question,
+  };
+}
+
+function buildSystemDesignFallbackReply(decision: CandidateDecision, previousAiTurn?: string) {
+  const primary = decision.question;
+  const alternate = "Keep this at architecture level. Give one concrete design choice and justify it with tradeoff plus reliability impact.";
+  return withVariation(primary, previousAiTurn, alternate);
 }
 
 function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSignalSnapshot) {
