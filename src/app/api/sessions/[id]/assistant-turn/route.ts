@@ -3,10 +3,11 @@ import { fail, ok } from "@/lib/http";
 import { getCommittedTranscriptSegments } from "@/lib/session/commit-arbiter";
 import { generateAssistantTurn } from "@/lib/assistant/generate-turn";
 import { evaluateTurnReward } from "@/lib/assistant/reward";
-import { deriveCurrentCodingStage } from "@/lib/assistant/stages";
+import { deriveCurrentCodingStage, deriveCurrentSystemDesignStage } from "@/lib/assistant/stages";
 import { enforceSessionBudgetLimit } from "@/lib/session/budget-enforcement";
 import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
 import { persistSessionSnapshots } from "@/lib/session/snapshots";
+import { guardSystemDesignStageTransition } from "@/lib/assistant/pass_conditions";
 import { assessSessionBudget, buildBudgetExceededReply } from "@/lib/usage/budget";
 import { resolveLowCostMode } from "@/lib/usage/cost";
 
@@ -42,11 +43,17 @@ export async function POST(_: Request, { params }: RouteContext) {
 
   const committedTranscripts = getCommittedTranscriptSegments(session.transcripts, session.events);
 
-  const currentStage = deriveCurrentCodingStage({
-    events: session.events,
-    transcripts: committedTranscripts,
-    latestExecutionRun: session.executionRuns[0] ?? null,
-  });
+  const currentStage =
+    session.mode === "SYSTEM_DESIGN"
+      ? deriveCurrentSystemDesignStage({
+          events: session.events,
+          transcripts: committedTranscripts,
+        })
+      : deriveCurrentCodingStage({
+          events: session.events,
+          transcripts: committedTranscripts,
+          latestExecutionRun: session.executionRuns[0] ?? null,
+        });
   const lowCostMode = resolveLowCostMode(session.events);
   const initialBudget = assessSessionBudget(session.events);
 
@@ -66,6 +73,7 @@ export async function POST(_: Request, { params }: RouteContext) {
       transcript: result.transcript,
       events: result.events,
       meta: {
+        mode: session.mode,
         source: "system",
         currentStage,
         suggestedStage: null,
@@ -128,6 +136,7 @@ export async function POST(_: Request, { params }: RouteContext) {
       transcript: result.transcript,
       events: result.events,
       meta: {
+        mode: session.mode,
         source: turn.source,
         currentStage,
         suggestedStage: null,
@@ -341,6 +350,7 @@ export async function POST(_: Request, { params }: RouteContext) {
       sessionId: id,
       eventType: SESSION_EVENT_TYPES.AI_SPOKE,
         payloadJson: {
+          mode: session.mode,
           transcriptSegmentId: transcript.id,
           source: turn.source,
           policyAction: turn.policyAction ?? null,
@@ -377,14 +387,24 @@ export async function POST(_: Request, { params }: RouteContext) {
     events.push(usageEvent);
   }
 
-  if (turn.suggestedStage && turn.suggestedStage !== currentStage) {
+  const suggestedStage =
+    session.mode === "SYSTEM_DESIGN"
+      ? guardSystemDesignStageTransition({
+          currentStage,
+          suggestedStage: turn.suggestedStage,
+          transcripts: committedTranscripts,
+          events: session.events,
+        })
+      : turn.suggestedStage ?? null;
+
+  if (suggestedStage && suggestedStage !== currentStage) {
     const stageEvent = await prisma.sessionEvent.create({
       data: {
         sessionId: id,
         eventType: SESSION_EVENT_TYPES.STAGE_ADVANCED,
         payloadJson: {
           previousStage: currentStage,
-          stage: turn.suggestedStage,
+          stage: suggestedStage,
           source: turn.source,
           reason: turn.policyReason ?? null,
         },
@@ -422,9 +442,10 @@ export async function POST(_: Request, { params }: RouteContext) {
     transcript,
     events,
     meta: {
+      mode: session.mode,
       source: turn.source,
       currentStage,
-      suggestedStage: turn.suggestedStage ?? null,
+      suggestedStage,
       policyAction: turn.policyAction ?? null,
       hintServed: turn.hintServed ?? false,
       hintLevel: turn.hintLevel ?? null,

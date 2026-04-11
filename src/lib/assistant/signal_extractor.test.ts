@@ -307,6 +307,35 @@ describe("extractCandidateSignals", () => {
     expect(snapshot.echoStrength).toMatch(/medium|high/);
     expect(snapshot.structuredEvidence.some((item) => /echoed the interviewer question/i.test(item.issue))).toBe(true);
   });
+
+  it("extracts system design signals and evidence refs in system design mode", () => {
+    const snapshot = extractCandidateSignals({
+      mode: "SYSTEM_DESIGN",
+      currentStage: "APPROACH_DISCUSSION",
+      recentTranscripts: [
+        {
+          speaker: "USER",
+          text: "The service must support post creation and timeline read APIs. Peak is around 20k qps with p99 under 250ms.",
+        },
+        {
+          speaker: "USER",
+          text: "Given 20k qps, we can shard by user id and add read replicas. Option A is fan-out on write, option B is fan-out on read; write is faster for reads but heavier on writes.",
+        },
+        {
+          speaker: "USER",
+          text: "A single region is a SPOF, so we should do multi-region failover. The main bottleneck is timeline fanout, we can use async queues and caching to optimize.",
+        },
+      ],
+      latestExecutionRun: null,
+    });
+
+    expect(snapshot.designSignals?.signals.requirement_missing).toBe(false);
+    expect(snapshot.designSignals?.signals.capacity_missing).toBe(false);
+    expect(snapshot.designSignals?.signals.tradeoff_missed).toBe(false);
+    expect(snapshot.designSignals?.signals.spof_missed).toBe(false);
+    expect(snapshot.designSignals?.signals.bottleneck_unexamined).toBe(false);
+    expect(snapshot.designSignals?.evidenceRefs.requirement_missing.length ?? 0).toBeGreaterThan(0);
+  });
 });
 
 

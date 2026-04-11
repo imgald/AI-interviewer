@@ -1,6 +1,7 @@
 ﻿import { describe, expect, it } from "vitest";
 import { makeCandidateDecision } from "@/lib/assistant/decision_engine";
 import { getPolicyPreset } from "@/lib/assistant/policy-config";
+import type { CodingInterviewPolicy } from "@/lib/assistant/policy";
 import type { CandidateSignalSnapshot } from "@/lib/assistant/signal_extractor";
 
 const baseSignals: CandidateSignalSnapshot = {
@@ -22,16 +23,17 @@ const baseSignals: CandidateSignalSnapshot = {
   trendSummary: "Candidate state is broadly stable relative to the previous snapshot.",
 };
 
-const basePolicy = {
+const basePolicy: CodingInterviewPolicy = {
   currentStage: "IMPLEMENTATION",
   recommendedAction: "LET_IMPLEMENT",
+  stageExitSatisfied: false,
   shouldServeHint: false,
+  promptStrategy: "GUIDED",
+  reason: "Continue implementation.",
   nextStage: "IMPLEMENTATION",
   exitCriteria: ["Keep coding"],
   checklist: [],
-  checklistProgress: { completed: 0, total: 0, remaining: 0 },
-  explanation: "Continue implementation.",
-} as const;
+};
 
 describe("makeCandidateDecision", () => {
   it("forces a narrow debug move after repeated failures", () => {
@@ -1077,6 +1079,7 @@ describe("makeCandidateDecision", () => {
     expect(["close_topic", "end_interview", "hold_and_listen"]).toContain(result.action);
   });
 });
+
 
 
 

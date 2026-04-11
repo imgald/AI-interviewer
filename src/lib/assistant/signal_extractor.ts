@@ -36,6 +36,21 @@ export type CandidateEvidenceItem = {
   fix: string;
 };
 
+export type DesignSignalKey =
+  | "requirement_missing"
+  | "capacity_missing"
+  | "tradeoff_missed"
+  | "spof_missed"
+  | "bottleneck_unexamined";
+
+export type DesignSignals = Record<DesignSignalKey, boolean>;
+
+export type DesignSignalSnapshot = {
+  signals: DesignSignals;
+  evidenceRefs: Record<DesignSignalKey, string[]>;
+  summary: string;
+};
+
 export type CandidateSignalSnapshot = {
   understanding: CandidateUnderstandingState;
   progress: CandidateProgressState;
@@ -58,10 +73,12 @@ export type CandidateSignalSnapshot = {
   summary: string;
   trendSummary?: string;
   source?: "heuristic" | "gemini-observer" | "openai-observer";
+  designSignals?: DesignSignalSnapshot;
 };
 
 export function extractCandidateSignals(input: {
   currentStage: CodingInterviewStage;
+  mode?: "CODING" | "SYSTEM_DESIGN";
   recentTranscripts: TranscriptLike[];
   recentEvents?: SessionEventLike[];
   latestExecutionRun?: ExecutionRunLike | null;
@@ -141,6 +158,11 @@ export function extractCandidateSignals(input: {
     );
   }
 
+  const designSignals =
+    input.mode === "SYSTEM_DESIGN"
+      ? extractSystemDesignSignals(input.recentTranscripts)
+      : undefined;
+
   return {
     understanding,
     progress,
@@ -175,11 +197,13 @@ export function extractCandidateSignals(input: {
     }),
     trendSummary: trendSummary ?? undefined,
     source: "heuristic",
+    designSignals,
   };
 }
 
 export async function extractCandidateSignalsSmart(input: {
   currentStage: CodingInterviewStage;
+  mode?: "CODING" | "SYSTEM_DESIGN";
   recentTranscripts: TranscriptLike[];
   recentEvents?: SessionEventLike[];
   latestExecutionRun?: ExecutionRunLike | null;
@@ -932,10 +956,126 @@ function parseObservedSignals(
           ? parsed.trendSummary.trim()
           : heuristic.trendSummary,
       source,
+      designSignals: heuristic.designSignals,
     };
   } catch {
     return null;
   }
+}
+
+function extractSystemDesignSignals(recentTranscripts: TranscriptLike[]): DesignSignalSnapshot {
+  const userTurns = recentTranscripts
+    .map((segment, index) => ({ segment, index }))
+    .filter((item) => item.segment.speaker === "USER");
+  const normalizedText = userTurns
+    .map((item) => item.segment.text.toLowerCase())
+    .join(" ")
+    .trim();
+
+  const functionalBoundaryPass =
+    /\b(requirement|scope|must support|should support|api|read path|write path|service boundary|component)\b/.test(
+      normalizedText,
+    );
+  const scalePass =
+    /\b(qps|rps|tps|requests per second|req\/s|concurrent users|dau|mau|traffic|throughput|reads per second|writes per second)\b/.test(
+      normalizedText,
+    );
+  const nonFunctionalPass =
+    /\b(latency|p95|p99|sla|slo|availability|reliability|durability|consistency|security|fault tolerance|cost)\b/.test(
+      normalizedText,
+    );
+  const requirementPass = functionalBoundaryPass && scalePass && nonFunctionalPass;
+
+  const hasEstimate =
+    /\b\d+(?:\.\d+)?\s*(qps|rps|tps|req\/s|requests per second|k|m|b|million|billion|gb|tb|mb|ms|s|users|dau|mau)\b/.test(
+      normalizedText,
+    );
+  const estimateUsedInDesign =
+    /\b(based on|given|therefore|so we need|which means|so we can)\b[\s\S]{0,80}\b(shard|partition|replica|cache|node|capacity|autoscal|queue|database|db|throughput|storage)\b/.test(
+      normalizedText,
+    ) ||
+    /\b(shard|partition|replica|cache|node|capacity|autoscal|queue|database|db|throughput|storage)\b[\s\S]{0,80}\b\d+(?:\.\d+)?\s*(qps|rps|tps|req\/s|k|m|b|gb|tb|mb|users|dau|mau)\b/.test(
+      normalizedText,
+    );
+  const capacityPass = hasEstimate && estimateUsedInDesign;
+
+  const tradeoffPass =
+    /\b(vs|versus|alternative|option a|option b|either|instead of)\b/.test(normalizedText) &&
+    /\b(pro|con|advantage|disadvantage|trade-?off|benefit|drawback|however|but)\b/.test(normalizedText);
+
+  const spofPass =
+    /\b(single point of failure|spof|single node|single leader|single region|single az)\b/.test(normalizedText) &&
+    /\b(replic|multi-az|multi region|failover|redundan|backup|retry|circuit breaker|leader election)\b/.test(
+      normalizedText,
+    );
+
+  const bottleneckPass =
+    /\b(bottleneck|hotspot|hot key|latency spike|queue buildup|backpressure|throughput limit)\b/.test(normalizedText) &&
+    /\b(optimi[sz]|scale out|cache|index|batch|async|partition|shard|cdn|read replica|denormali[sz])\b/.test(
+      normalizedText,
+    );
+
+  const signals: DesignSignals = {
+    requirement_missing: !requirementPass,
+    capacity_missing: !capacityPass,
+    tradeoff_missed: !tradeoffPass,
+    spof_missed: !spofPass,
+    bottleneck_unexamined: !bottleneckPass,
+  };
+
+  const evidenceRefs: Record<DesignSignalKey, string[]> = {
+    requirement_missing: collectUserEvidenceRefs(userTurns, [
+      /\b(requirement|scope|must support|should support|api|service boundary|component)\b/i,
+      /\b(qps|rps|tps|requests per second|req\/s|concurrent users|dau|mau|traffic|throughput)\b/i,
+      /\b(latency|p95|p99|sla|slo|availability|reliability|durability|consistency|security|fault tolerance|cost)\b/i,
+    ]),
+    capacity_missing: collectUserEvidenceRefs(userTurns, [
+      /\b\d+(?:\.\d+)?\s*(qps|rps|tps|req\/s|requests per second|k|m|b|million|billion|gb|tb|mb|users|dau|mau)\b/i,
+      /\b(shard|partition|replica|cache|node|capacity|autoscal|queue|database|db|throughput|storage)\b/i,
+    ]),
+    tradeoff_missed: collectUserEvidenceRefs(userTurns, [
+      /\b(vs|versus|alternative|option a|option b|either|instead of)\b/i,
+      /\b(pro|con|advantage|disadvantage|trade-?off|benefit|drawback|however|but)\b/i,
+    ]),
+    spof_missed: collectUserEvidenceRefs(userTurns, [
+      /\b(single point of failure|spof|single node|single leader|single region|single az)\b/i,
+      /\b(replic|multi-az|multi region|failover|redundan|backup|retry|circuit breaker|leader election)\b/i,
+    ]),
+    bottleneck_unexamined: collectUserEvidenceRefs(userTurns, [
+      /\b(bottleneck|hotspot|hot key|latency spike|queue buildup|backpressure|throughput limit)\b/i,
+      /\b(optimi[sz]|scale out|cache|index|batch|async|partition|shard|cdn|read replica|denormali[sz])\b/i,
+    ]),
+  };
+
+  const summary = [
+    signals.requirement_missing ? "requirements incomplete" : "requirements covered",
+    signals.capacity_missing ? "capacity missing" : "capacity covered",
+    signals.tradeoff_missed ? "tradeoff missing" : "tradeoff covered",
+    signals.spof_missed ? "SPOF missing" : "SPOF covered",
+    signals.bottleneck_unexamined ? "bottleneck analysis missing" : "bottleneck analyzed",
+  ].join("; ");
+
+  return {
+    signals,
+    evidenceRefs,
+    summary,
+  };
+}
+
+function collectUserEvidenceRefs(
+  turns: Array<{ segment: TranscriptLike; index: number }>,
+  patterns: RegExp[],
+) {
+  const refs = turns
+    .filter((turn) => patterns.some((pattern) => pattern.test(turn.segment.text)))
+    .slice(-2)
+    .map((turn) => `USER#${turn.index + 1}: ${turn.segment.text.replace(/\s+/g, " ").trim().slice(0, 140)}`);
+
+  if (refs.length > 0) {
+    return refs;
+  }
+
+  return ["No direct candidate evidence in recent turns."];
 }
 
 function extractJsonObject(text: string) {

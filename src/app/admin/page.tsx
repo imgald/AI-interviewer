@@ -2,6 +2,8 @@
 import { buildUnifiedOpsFeed, getAdminProfileDetail, listAdminProfiles, type OpsFeedScope } from "@/lib/admin/ops";
 import { derivePolicyTuningSuggestions, runPolicyRegressionLab } from "@/lib/assistant/policy-regression";
 
+export const dynamic = "force-dynamic";
+
 type AdminPageProps = {
   searchParams?: Promise<{
     profileId?: string;

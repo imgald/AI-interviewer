@@ -2,6 +2,8 @@ import { prisma } from "@/lib/db";
 import { QuestionsExplorer, type QuestionExplorerItem } from "@/components/questions/questions-explorer";
 import { QUESTION_BANK } from "@/lib/interview/question-bank";
 
+export const dynamic = "force-dynamic";
+
 const shellStyle = {
   minHeight: "100vh",
   padding: "24px 20px 40px",

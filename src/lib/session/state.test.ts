@@ -182,4 +182,15 @@ describe("buildSessionSnapshotState", () => {
     expect(state.intentSnapshots).toHaveLength(1);
     expect(state.trajectorySnapshots).toHaveLength(1);
   });
+
+  it("preserves session mode in snapshot state", () => {
+    const state = buildSessionSnapshotState({
+      mode: "SYSTEM_DESIGN",
+      currentStage: "APPROACH_DISCUSSION",
+      events: [],
+      executionRuns: [],
+    });
+
+    expect(state.mode).toBe("SYSTEM_DESIGN");
+  });
 });

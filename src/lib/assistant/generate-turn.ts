@@ -30,6 +30,7 @@ import { estimateCandidateTrajectory, type TrajectoryEstimate } from "@/lib/assi
 import {
   describeCodingStage,
   inferSuggestedCodingStage,
+  inferSuggestedSystemDesignStage,
   isCodingInterviewStage,
   stageGuidance,
   type CodingInterviewStage,
@@ -67,6 +68,8 @@ type GenerateAssistantTurnInput = {
   }>;
   latestExecutionRun?: ExecutionRunLike | null;
 };
+
+type InterviewMode = "CODING" | "SYSTEM_DESIGN";
 
 type GenerateAssistantTurnResult = {
   reply: string;
@@ -138,8 +141,26 @@ export type StreamingAssistantTurnChunk = {
 export async function generateAssistantTurn(
   input: GenerateAssistantTurnInput,
 ): Promise<GenerateAssistantTurnResult> {
+  const mode = normalizeInterviewMode(input.mode);
+  if (mode === "SYSTEM_DESIGN") {
+    return generateSystemDesignAssistantTurn(input);
+  }
+  return generateCodingAssistantTurn(input);
+}
+
+async function generateSystemDesignAssistantTurn(
+  input: GenerateAssistantTurnInput,
+): Promise<GenerateAssistantTurnResult> {
+  // Phase 0 routing scaffold: reuse coding interviewer behavior until dedicated SD policy lands.
+  return generateCodingAssistantTurn(input);
+}
+
+async function generateCodingAssistantTurn(
+  input: GenerateAssistantTurnInput,
+): Promise<GenerateAssistantTurnResult> {
   const signals = await extractCandidateSignalsSmart({
     currentStage: normalizeStage(input.currentStage),
+    mode: normalizeInterviewMode(input.mode),
     recentTranscripts: input.recentTranscripts,
     recentEvents: input.recentEvents,
     latestExecutionRun: input.latestExecutionRun,
@@ -202,8 +223,29 @@ export async function* streamAssistantTurn(
   input: GenerateAssistantTurnInput,
   options?: { signal?: AbortSignal },
 ): AsyncGenerator<StreamingAssistantTurnChunk> {
+  const mode = normalizeInterviewMode(input.mode);
+  if (mode === "SYSTEM_DESIGN") {
+    yield* streamSystemDesignAssistantTurn(input, options);
+    return;
+  }
+  yield* streamCodingAssistantTurn(input, options);
+}
+
+async function* streamSystemDesignAssistantTurn(
+  input: GenerateAssistantTurnInput,
+  options?: { signal?: AbortSignal },
+): AsyncGenerator<StreamingAssistantTurnChunk> {
+  // Phase 0 routing scaffold: reuse coding interviewer behavior until dedicated SD policy lands.
+  yield* streamCodingAssistantTurn(input, options);
+}
+
+async function* streamCodingAssistantTurn(
+  input: GenerateAssistantTurnInput,
+  options?: { signal?: AbortSignal },
+): AsyncGenerator<StreamingAssistantTurnChunk> {
   const signals = await extractCandidateSignalsSmart({
     currentStage: normalizeStage(input.currentStage),
+    mode: normalizeInterviewMode(input.mode),
     recentTranscripts: input.recentTranscripts,
     recentEvents: input.recentEvents,
     latestExecutionRun: input.latestExecutionRun,
@@ -1329,6 +1371,14 @@ function generateFallbackTurn(
 }
 
 function inferStage(reply: string, input: GenerateAssistantTurnInput) {
+  if (normalizeInterviewMode(input.mode) === "SYSTEM_DESIGN") {
+    return inferSuggestedSystemDesignStage({
+      currentStage: input.currentStage,
+      latestUserTurn: findLatestTurn(input.recentTranscripts, "USER"),
+      reply,
+      events: input.recentEvents,
+    });
+  }
   return inferSuggestedCodingStage({
     currentStage: input.currentStage,
     latestExecutionRun: input.latestExecutionRun,
@@ -1788,6 +1838,10 @@ function readProviderErrorMessage(payload: Record<string, unknown>) {
 
 function normalizeStage(stage: string | null | undefined): CodingInterviewStage {
   return isCodingInterviewStage(stage) ? stage : "PROBLEM_UNDERSTANDING";
+}
+
+function normalizeInterviewMode(mode: string | null | undefined): InterviewMode {
+  return mode === "SYSTEM_DESIGN" ? "SYSTEM_DESIGN" : "CODING";
 }
 
 function buildDecision(input: GenerateAssistantTurnInput, signals: CandidateSignalSnapshot) {

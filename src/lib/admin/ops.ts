@@ -11,7 +11,7 @@ import {
   readIntentSnapshots,
   readTrajectorySnapshots,
 } from "@/lib/session/snapshots";
-import { describeCodingStage, isCodingInterviewStage } from "@/lib/assistant/stages";
+import { describeInterviewStage, isCodingInterviewStage } from "@/lib/assistant/stages";
 import { getPersonaJobSnapshot, type PersonaJobSnapshot } from "@/lib/persona/queue";
 
 export type OpsFeedScope = "all" | "persona" | "session";
@@ -316,6 +316,7 @@ function buildPersonaEventDescription(eventType: string, payloadJson: unknown) {
 
 function summarizeSession(session: {
   id: string;
+  mode: "CODING" | "SYSTEM_DESIGN";
   events: Array<{ eventType: string; eventTime: Date; payloadJson: unknown }>;
   transcripts: Array<{ id?: string; speaker: "USER" | "AI" | "SYSTEM"; text: string; segmentIndex: number; isFinal: boolean }>;
   candidateStateSnapshots: Array<{ id: string; stage: string | null; source: string | null; snapshotJson: unknown; createdAt: Date }>;
@@ -351,6 +352,7 @@ function summarizeSession(session: {
   }).length;
 
   const snapshotState = buildSessionSnapshotState({
+    mode: session.mode,
     currentStage:
       stringValue(asRecord(latestCodeRunEvent?.payloadJson).stage) ??
       stringValue(asRecord([...ordered].reverse().find((event) => event.eventType === "STAGE_ADVANCED")?.payloadJson).stage) ??
@@ -448,7 +450,8 @@ function buildSessionTimeline(
       }
 
       if (event.eventType === "SIGNAL_SNAPSHOT_RECORDED") {
-        const signals = asRecord(payload.signals);
+        const signals = normalizeSignalsForLedger(asRecord(payload.signals));
+        const designSignals = readDesignSignals(signals);
         const structuredEvidence = Array.isArray(signals.structuredEvidence) ? signals.structuredEvidence : [];
         const primaryIssue = structuredEvidence.find((item) => typeof item === "object" && item !== null && typeof (item as Record<string, unknown>).issue === "string") as Record<string, unknown> | undefined;
         const signalStageRaw = stringValue(payload.stage);
@@ -481,7 +484,9 @@ function buildSessionTimeline(
           title: "Candidate state snapshot",
           summary: primaryIssue?.issue
             ? `Issue spotted: ${String(primaryIssue.issue)}`
-            : `understanding=${stringOrFallback(signals.understanding, "unknown")}, progress=${stringOrFallback(signals.progress, "unknown")}, quality=${stringOrFallback(signals.codeQuality, "unknown")}`,
+            : designSignals
+              ? summarizeDesignSignals(designSignals)
+              : `understanding=${stringOrFallback(signals.understanding, "unknown")}, progress=${stringOrFallback(signals.progress, "unknown")}, quality=${stringOrFallback(signals.codeQuality, "unknown")}`,
           unresolvedIssues: signalLedger.unresolvedIssues,
           missingEvidence: signalLedger.missingEvidence,
           answeredTargets: signalLedger.answeredTargets,
@@ -777,7 +782,8 @@ export function buildSessionEventDescription(eventType: string, payloadJson: unk
   }
 
   if (eventType === "SIGNAL_SNAPSHOT_RECORDED") {
-    const signals = asRecord(payload.signals);
+    const signals = normalizeSignalsForLedger(asRecord(payload.signals));
+    const designSignals = readDesignSignals(signals);
     const structuredEvidence = Array.isArray(signals.structuredEvidence) ? signals.structuredEvidence : [];
     const primaryIssue = structuredEvidence.find((item) => typeof item === "object" && item !== null && typeof (item as Record<string, unknown>).issue === "string") as Record<string, unknown> | undefined;
     const signalStageRaw = stringValue(payload.stage);
@@ -800,7 +806,9 @@ export function buildSessionEventDescription(eventType: string, payloadJson: unk
     });
     return primaryIssue?.issue
       ? `Candidate state updated. Primary observed issue: ${String(primaryIssue.issue)}. Ceiling=${calibration.candidateCeiling}, ease=${calibration.easeOfExecution}, flow=${flowState.muteUntilPause ? "mute" : "open"}.`
-      : `Candidate state updated: understanding=${stringOrFallback(signals.understanding, "unknown")}, progress=${stringOrFallback(signals.progress, "unknown")}, edge cases=${stringOrFallback(signals.edgeCaseAwareness, "unknown")}, ceiling=${calibration.candidateCeiling}, ease=${calibration.easeOfExecution}.`;
+      : designSignals
+        ? `Candidate state updated: ${summarizeDesignSignals(designSignals)}, ceiling=${calibration.candidateCeiling}, ease=${calibration.easeOfExecution}.`
+        : `Candidate state updated: understanding=${stringOrFallback(signals.understanding, "unknown")}, progress=${stringOrFallback(signals.progress, "unknown")}, edge cases=${stringOrFallback(signals.edgeCaseAwareness, "unknown")}, ceiling=${calibration.candidateCeiling}, ease=${calibration.easeOfExecution}.`;
   }
 
   if (eventType === "DECISION_RECORDED") {
@@ -1013,12 +1021,59 @@ function stringValue(value: unknown) {
   return null;
 }
 
-function describeStage(value: unknown) {
-  if (!isCodingInterviewStage(value)) {
+function readDesignSignals(signals: Record<string, unknown>) {
+  const designSignalsContainer = asRecord(signals.designSignals);
+  const signalValues = asRecord(designSignalsContainer.signals);
+  if (Object.keys(signalValues).length === 0) {
     return null;
   }
 
-  return describeCodingStage(value);
+  return {
+    requirementMissing: signalValues.requirement_missing === true,
+    capacityMissing: signalValues.capacity_missing === true,
+    tradeoffMissed: signalValues.tradeoff_missed === true,
+    spofMissed: signalValues.spof_missed === true,
+    bottleneckUnexamined: signalValues.bottleneck_unexamined === true,
+  };
+}
+
+function summarizeDesignSignals(input: {
+  requirementMissing: boolean;
+  capacityMissing: boolean;
+  tradeoffMissed: boolean;
+  spofMissed: boolean;
+  bottleneckUnexamined: boolean;
+}) {
+  return [
+    `requirements=${input.requirementMissing ? "missing" : "covered"}`,
+    `capacity=${input.capacityMissing ? "missing" : "covered"}`,
+    `tradeoff=${input.tradeoffMissed ? "missing" : "covered"}`,
+    `spof=${input.spofMissed ? "missing" : "covered"}`,
+    `bottleneck=${input.bottleneckUnexamined ? "missing" : "covered"}`,
+  ].join(", ");
+}
+
+function describeStage(value: unknown) {
+  return typeof value === "string" ? describeInterviewStage(value) : null;
+}
+
+function normalizeSignalsForLedger(signals: Record<string, unknown>) {
+  const normalized: Record<string, unknown> = { ...signals };
+
+  if (!Array.isArray(normalized.structuredEvidence)) {
+    normalized.structuredEvidence = [];
+  }
+  if (!Array.isArray(normalized.evidence)) {
+    normalized.evidence = [];
+  }
+  if (typeof normalized.confidence !== "number") {
+    normalized.confidence = 0.5;
+  }
+  if (typeof normalized.summary !== "string") {
+    normalized.summary = "Candidate state updated.";
+  }
+
+  return normalized;
 }
 
 

@@ -7,6 +7,8 @@ import { getCommittedTranscriptSegments } from "@/lib/session/commit-arbiter";
 import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
 import { resolveLowCostMode, summarizeUsageFromSessionEvents } from "@/lib/usage/cost";
 
+export const dynamic = "force-dynamic";
+
 type InterviewRoomPageProps = {
   params: Promise<{ id: string }>;
 };
@@ -69,11 +71,14 @@ export default async function InterviewRoomPage({ params }: InterviewRoomPagePro
   });
   const truthEvents = [...session.events, ...transcriptRefinementEvents];
   const committedTranscripts = getCommittedTranscriptSegments(session.transcripts, truthEvents);
-  const initialStage = deriveCurrentCodingStage({
-    events: truthEvents,
-    transcripts: committedTranscripts,
-    latestExecutionRun: session.executionRuns[0] ?? null,
-  });
+  const initialStage =
+    session.mode === "SYSTEM_DESIGN"
+      ? "PROBLEM_UNDERSTANDING"
+      : deriveCurrentCodingStage({
+          events: truthEvents,
+          transcripts: committedTranscripts,
+          latestExecutionRun: session.executionRuns[0] ?? null,
+        });
   const lowCostMode = resolveLowCostMode(session.events);
   const usageSummary = summarizeUsageFromSessionEvents(session.events);
 

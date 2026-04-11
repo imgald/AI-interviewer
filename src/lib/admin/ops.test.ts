@@ -165,6 +165,26 @@ describe("buildUnifiedOpsFeed", () => {
     expect(description === undefined || /flow=|ceiling=|ease=/i.test(description)).toBe(true);
   });
 
+  it("describes system design signal snapshots in a readable way", () => {
+    const description = buildSessionEventDescription("SIGNAL_SNAPSHOT_RECORDED", {
+      signals: {
+        designSignals: {
+          signals: {
+            requirement_missing: true,
+            capacity_missing: false,
+            tradeoff_missed: true,
+            spof_missed: false,
+            bottleneck_unexamined: true,
+          },
+        },
+      },
+    });
+
+    expect(description).toMatch(/requirements=missing/i);
+    expect(description).toMatch(/capacity=covered/i);
+    expect(description).toMatch(/tradeoff=missing/i);
+  });
+
   it("describes interviewer decisions in a readable way", () => {
     const description = buildSessionEventDescription("DECISION_RECORDED", {
       decision: {

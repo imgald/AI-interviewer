@@ -20,7 +20,7 @@ const baseSignals: CandidateSignalSnapshot = {
   readyToCode: true,
   reasoningDepth: "moderate",
   testingDiscipline: "partial",
-  complexityRigor: "moderate",
+  complexityRigor: "partial",
   confidence: 0.72,
   evidence: [],
   structuredEvidence: [],

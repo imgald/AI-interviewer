@@ -434,4 +434,73 @@ describe("POST /api/sessions", () => {
       orderBy: { createdAt: "asc" },
     });
   });
+
+  it("persists system design mode and queries a system design question pool", async () => {
+    prisma.user.findFirst.mockResolvedValue({
+      id: "user-1",
+      email: "demo@example.com",
+    });
+    prisma.question.findMany.mockResolvedValue([
+      {
+        id: "question-sd-1",
+        title: "Design URL Shortener",
+      },
+    ]);
+    prisma.interviewSession.create.mockResolvedValue({
+      id: "session-sd-1",
+      status: "READY",
+      personaStatus: null,
+      questionId: "question-sd-1",
+      mode: "SYSTEM_DESIGN",
+    });
+    prisma.sessionEvent.create.mockResolvedValue({
+      id: "event-sd-1",
+    });
+
+    const { POST } = await import("@/app/api/sessions/route");
+    const request = new Request("http://localhost/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "SYSTEM_DESIGN",
+        targetLevel: "SDE2",
+        selectedLanguage: "PYTHON",
+        companyStyle: "GENERIC",
+        voiceEnabled: true,
+        personaEnabled: false,
+      }),
+    });
+
+    const response = await POST(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(201);
+    expect(payload.data.sessionId).toBe("session-sd-1");
+    expect(prisma.question.findMany).toHaveBeenCalledWith({
+      where: {
+        type: "SYSTEM_DESIGN",
+        isActive: true,
+        companyStyle: "GENERIC",
+        levelTarget: "SDE2",
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    expect(prisma.interviewSession.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          mode: "SYSTEM_DESIGN",
+        }),
+      }),
+    );
+    expect(prisma.sessionEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "SESSION_CREATED",
+          payloadJson: expect.objectContaining({
+            mode: "SYSTEM_DESIGN",
+          }),
+        }),
+      }),
+    );
+  });
 });

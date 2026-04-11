@@ -78,6 +78,7 @@ describe("assistant turn stream route", () => {
     expect(text).toContain("event: meta");
     expect(text).toContain("event: delta");
     expect(text).toContain("event: done");
+    expect(text).toContain("\"mode\":\"CODING\"");
   });
 
   it("does not create a duplicate stage event when the assistant stays in the same stage", async () => {
@@ -144,6 +145,7 @@ describe("assistant turn stream route", () => {
         sessionId: "session-1",
         eventType: "AI_SPOKE",
         payloadJson: {
+          mode: "CODING",
           transcriptSegmentId: "seg-1",
           source: "fallback",
         },
@@ -261,6 +263,47 @@ describe("assistant turn stream route", () => {
         }),
       }),
     );
+  });
+
+  it("guards system design stage transitions in streaming route with api contract gate", async () => {
+    prisma.interviewSession.findUnique.mockResolvedValue({
+      id: "session-sd-1",
+      mode: "SYSTEM_DESIGN",
+      targetLevel: "SDE2",
+      selectedLanguage: "PYTHON",
+      question: { title: "Design URL Shortener", prompt: "Design a URL shortener." },
+      interviewerContext: null,
+      interviewerProfile: null,
+      transcripts: [{ id: "u1", speaker: "USER", text: "We need APIs for global traffic and high availability.", segmentIndex: 0, isFinal: true }],
+      executionRuns: [],
+      events: [],
+    });
+    streamAssistantTurn.mockImplementation(async function* () {
+      yield {
+        final: {
+          reply: "Let's go deeper into replication tradeoffs.",
+          suggestedStage: "DEEP_DIVE",
+          source: "fallback",
+        },
+      };
+    });
+    prisma.transcriptSegment.create.mockResolvedValue({
+      id: "seg-sd-1",
+      text: "Let's go deeper into replication tradeoffs.",
+      speaker: "AI",
+      segmentIndex: 1,
+    });
+    prisma.sessionEvent.create.mockResolvedValue({ id: "evt-sd-1", eventType: "GENERIC" });
+
+    const { POST } = await import("@/app/api/sessions/[id]/assistant-turn/stream/route");
+    const response = await POST(new Request("http://localhost", { method: "POST" }), {
+      params: Promise.resolve({ id: "session-sd-1" }),
+    });
+
+    const text = await response.text();
+    expect(response.status).toBe(200);
+    expect(text).toContain("\"currentStage\":\"API_CONTRACT_CHECK\"");
+    expect(text).toContain("\"suggestedStage\":\"API_CONTRACT_CHECK\"");
   });
 });
 

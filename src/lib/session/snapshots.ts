@@ -11,6 +11,19 @@ type SnapshotRow = {
   createdAt: Date;
 };
 
+export type DesignSignalKey =
+  | "requirement_missing"
+  | "capacity_missing"
+  | "tradeoff_missed"
+  | "spof_missed"
+  | "bottleneck_unexamined";
+
+export type DesignSignalSnapshot = {
+  signals: Record<DesignSignalKey, boolean>;
+  evidenceRefs: Record<DesignSignalKey, string[]>;
+  summary: string;
+};
+
 export type CandidateStateSnapshotRow = SnapshotRow & {
   snapshotJson: unknown;
 };

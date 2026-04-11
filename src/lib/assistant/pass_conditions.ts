@@ -1,6 +1,13 @@
 import type { MemoryLedger } from "@/lib/assistant/memory_ledger";
 import type { CandidateSignalSnapshot } from "@/lib/assistant/signal_extractor";
-import type { CodingInterviewStage } from "@/lib/assistant/stages";
+import {
+  analyzeSystemDesignConversation,
+  compareSystemDesignStageOrder,
+  inferSystemDesignStage,
+  isSystemDesignStage,
+  type CodingInterviewStage,
+  type SystemDesignStage,
+} from "@/lib/assistant/stages";
 
 type ExecutionRunLike = {
   status: "PASSED" | "FAILED" | "ERROR" | "TIMEOUT";
@@ -27,6 +34,16 @@ export type PassConditionsAssessment = {
   complexity: TopicPassAssessment;
   testing: TopicPassAssessment;
   wrapUp: TopicPassAssessment;
+};
+
+export type SystemDesignPassConditionsAssessment = {
+  requirementsDone: boolean;
+  apiContractRequired: boolean;
+  apiContractDone: boolean;
+  scalingActivated: boolean;
+  capacityDone: boolean;
+  architectureDone: boolean;
+  optimizationDiscussed: boolean;
 };
 
 export function assessPassConditions(input: {
@@ -152,6 +169,76 @@ export function assessPassConditions(input: {
     testing: buildTopicAssessment("testing", testingConditions, testingSatisfied),
     wrapUp: buildTopicAssessment("wrap_up", wrapUpConditions, wrapUpSatisfied),
   };
+}
+
+export function assessSystemDesignPassConditions(input: {
+  transcripts?: Array<{ speaker: "USER" | "AI" | "SYSTEM"; text: string }>;
+  events?: Array<{ eventType: string; eventTime?: Date | string; payloadJson?: unknown }>;
+}): SystemDesignPassConditionsAssessment {
+  const analysis = analyzeSystemDesignConversation({
+    transcripts: input.transcripts,
+    events: input.events,
+  });
+
+  return {
+    requirementsDone: analysis.requirementsDone,
+    apiContractRequired: analysis.apiContractRequired,
+    apiContractDone: analysis.apiContractDone,
+    scalingActivated: analysis.scalingActivated,
+    capacityDone: analysis.capacityDone,
+    architectureDone: analysis.architectureDone,
+    optimizationDiscussed: analysis.optimizationDiscussed,
+  };
+}
+
+export function guardSystemDesignStageTransition(input: {
+  currentStage?: string | null;
+  suggestedStage?: string | null;
+  transcripts?: Array<{ speaker: "USER" | "AI" | "SYSTEM"; text: string }>;
+  events?: Array<{ eventType: string; eventTime?: Date | string; payloadJson?: unknown }>;
+}): SystemDesignStage {
+  const currentStage = isSystemDesignStage(input.currentStage) ? input.currentStage : "REQUIREMENTS";
+  const inferredStage = inferSystemDesignStage({
+    transcripts: input.transcripts,
+    events: input.events,
+  });
+  const candidateStage = isSystemDesignStage(input.suggestedStage) ? input.suggestedStage : inferredStage;
+  const pass = assessSystemDesignPassConditions({
+    transcripts: input.transcripts,
+    events: input.events,
+  });
+
+  if (!pass.requirementsDone && currentStage === "REQUIREMENTS" && candidateStage !== "REQUIREMENTS") {
+    return currentStage;
+  }
+
+  if (
+    pass.requirementsDone &&
+    pass.apiContractRequired &&
+    !pass.apiContractDone &&
+    (currentStage === "REQUIREMENTS" || currentStage === "API_CONTRACT_CHECK") &&
+    ["HIGH_LEVEL", "CAPACITY", "DEEP_DIVE", "REFINEMENT", "WRAP_UP"].includes(candidateStage)
+  ) {
+    return currentStage === "REQUIREMENTS" ? "API_CONTRACT_CHECK" : currentStage;
+  }
+
+  if (
+    !pass.architectureDone &&
+    (currentStage === "REQUIREMENTS" || currentStage === "API_CONTRACT_CHECK") &&
+    ["DEEP_DIVE", "REFINEMENT", "WRAP_UP"].includes(candidateStage)
+  ) {
+    return "HIGH_LEVEL";
+  }
+
+  if (pass.scalingActivated && !pass.capacityDone && ["DEEP_DIVE", "REFINEMENT", "WRAP_UP"].includes(candidateStage)) {
+    return "CAPACITY";
+  }
+
+  if (compareSystemDesignStageOrder(candidateStage, currentStage) < 0) {
+    return currentStage;
+  }
+
+  return candidateStage;
 }
 
 export function selectRelevantPassAssessment(

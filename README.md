@@ -1296,6 +1296,15 @@ Execution principle:
 - only add mode-aware adapters where system-design semantics are truly different
 - keep decision/reward/report explainability unchanged (`snapshot -> decision -> reward -> report`)
 
+Current implementation status (updated April 11, 2026):
+- `Phase 0` completed
+  - `SYSTEM_DESIGN` mode is wired from setup/session into assistant routing.
+- `Phase 1` completed
+  - six-stage state machine is active with `API_CONTRACT_CHECK` and on-demand `CAPACITY` gating.
+- `Phase 2` completed
+  - five design signals + evidence refs are extracted and recorded into snapshots/events with `/admin` visibility.
+- next active build target: `Phase 3` (`Decision engine extension`).
+
 Phase sequence:
 
 1. Phase 0 (`P0`) - Mode switch foundation
@@ -1309,15 +1318,21 @@ Phase sequence:
 2. Phase 1 (`P0`) - Six-stage state machine
 - add canonical design stages:
   - `REQUIREMENTS`
-  - `CAPACITY`
+  - `API_CONTRACT_CHECK` (optional, prompt-dependent)
+  - `CAPACITY` (on-demand)
   - `HIGH_LEVEL`
   - `DEEP_DIVE`
   - `REFINEMENT`
   - `WRAP_UP`
-- add stage inference + transition guard (forbid deep-dive before capacity pass)
+- stage semantics:
+  - default path can go `REQUIREMENTS -> HIGH_LEVEL` without forced capacity
+  - `API_CONTRACT_CHECK` is required only for API-centric product-design prompts
+  - `CAPACITY` becomes mandatory once scaling/reliability/cost concerns are activated
+- add stage inference + transition guard (forbid deeper scaling discussion before on-demand capacity pass)
 - DoD:
   - stage progression is visible/auditable in `/admin`
-  - flow cannot skip capacity into deep dive
+  - flow can skip early capacity for non-scaling turns
+  - once scaling context is active, flow cannot continue deep dive without capacity
   - stage reasoning is deterministic and explainable
 
 3. Phase 2 (`P0`) - Signal extractor extension
@@ -1328,6 +1343,13 @@ Phase sequence:
   - `spof_missed`
   - `bottleneck_unexamined`
 - emit design signal snapshots with evidence references
+- signal pass rules:
+  - `requirement_missing=false` requires:
+    - functional requirements coverage
+    - scale context
+    - at least one non-functional requirement
+  - `capacity_missing` is evaluated as a required signal only after scaling context is activated
+  - `API_CONTRACT_CHECK` evidence is evaluated when the prompt requires API definition
 - DoD:
   - all five signals can be detected and tracked over turns
   - each signal has explicit evidence
@@ -1336,6 +1358,7 @@ Phase sequence:
 4. Phase 3 (`P0`) - Decision engine extension
 - add design actions:
   - `ASK_REQUIREMENT`
+  - `ASK_API_CONTRACT`
   - `ASK_CAPACITY`
   - `PROBE_TRADEOFF`
   - `CHALLENGE_SPOF`
@@ -1343,7 +1366,8 @@ Phase sequence:
 - keep one unified score model (`argmax`) and add system-design boosts/penalties
 - add `No Code Invariant` in system-design mode (forbid coding-implementation prompts)
 - DoD:
-  - interviewer actively asks for QPS/scale when missing
+  - interviewer asks API contract questions for API-centric prompts before high-level design
+  - interviewer asks for QPS/scale when scaling context is active and capacity is missing
   - interviewer challenges hand-wavy tradeoffs and SPOF gaps
   - decisions remain score-decomposed and auditable
 

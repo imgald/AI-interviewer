@@ -78,6 +78,7 @@ describe("assistant turn route", () => {
 
     expect(response.status).toBe(200);
     expect(payload.ok).toBe(true);
+    expect(payload.data.meta.mode).toBe("CODING");
     expect(prisma.transcriptSegment.create).toHaveBeenCalledWith({
       data: {
         sessionId: "session-1",
@@ -88,6 +89,15 @@ describe("assistant turn route", () => {
       },
     });
     expect(prisma.sessionEvent.create).toHaveBeenCalledTimes(2);
+    expect(prisma.sessionEvent.create.mock.calls[0]?.[0]).toMatchObject({
+      data: {
+        sessionId: "session-1",
+        eventType: "AI_SPOKE",
+        payloadJson: {
+          mode: "CODING",
+        },
+      },
+    });
     expect(prisma.sessionEvent.create.mock.lastCall?.[0]).toMatchObject({
       data: {
         sessionId: "session-1",
@@ -413,6 +423,53 @@ describe("assistant turn route", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           eventType: "ECHO_RECOVERY_PROMPTED",
+        }),
+      }),
+    );
+  });
+
+  it("applies system design stage guard and routes to api contract check before deep dive", async () => {
+    prisma.interviewSession.findUnique.mockResolvedValue({
+      id: "session-sd-1",
+      mode: "SYSTEM_DESIGN",
+      targetLevel: "SDE2",
+      selectedLanguage: "PYTHON",
+      endedAt: null,
+      question: { title: "Design URL Shortener", prompt: "Design a URL shortener." },
+      interviewerContext: null,
+      interviewerProfile: null,
+      transcripts: [
+        { id: "u1", segmentIndex: 0, speaker: "USER", text: "We need APIs for global traffic with high availability.", isFinal: true },
+      ],
+      executionRuns: [],
+      events: [],
+    });
+    generateAssistantTurn.mockResolvedValue({
+      reply: "Let's go deeper into replication tradeoffs.",
+      suggestedStage: "DEEP_DIVE",
+      source: "fallback",
+    });
+    prisma.transcriptSegment.create.mockResolvedValue({
+      id: "seg-sd-1",
+      text: "Let's go deeper into replication tradeoffs.",
+      speaker: "AI",
+      segmentIndex: 1,
+    });
+    prisma.sessionEvent.create.mockResolvedValue({ id: "evt-sd-1", eventType: "AI_SPOKE" });
+
+    const { POST } = await import("@/app/api/sessions/[id]/assistant-turn/route");
+    const response = await POST(new Request("http://localhost", { method: "POST" }), {
+      params: Promise.resolve({ id: "session-sd-1" }),
+    });
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.data.meta.currentStage).toBe("API_CONTRACT_CHECK");
+    expect(payload.data.meta.suggestedStage).toBe("API_CONTRACT_CHECK");
+    expect(prisma.sessionEvent.create).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          eventType: "STAGE_ADVANCED",
         }),
       }),
     );

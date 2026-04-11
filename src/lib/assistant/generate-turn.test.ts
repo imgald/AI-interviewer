@@ -39,6 +39,18 @@ describe("generateAssistantTurn", () => {
     expect(result.reply).toMatch(/first-pass approach|restate/i);
   });
 
+  it("routes system design mode through the dedicated mode branch", async () => {
+    const result = await generateAssistantTurn({
+      mode: "SYSTEM_DESIGN",
+      questionTitle: "Design TinyURL",
+      questionPrompt: "Design a URL shortening service.",
+      recentTranscripts: [],
+    });
+
+    expect(result.source).toBe("fallback");
+    expect(result.reply.length).toBeGreaterThan(0);
+  });
+
   it("asks about debugging after an execution error", async () => {
     const result = await generateAssistantTurn({
       mode: "CODING",

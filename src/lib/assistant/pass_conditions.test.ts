@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { assessPassConditions, selectRelevantPassAssessment } from "@/lib/assistant/pass_conditions";
+import {
+  assessPassConditions,
+  guardSystemDesignStageTransition,
+  selectRelevantPassAssessment,
+} from "@/lib/assistant/pass_conditions";
 import { buildMemoryLedger } from "@/lib/assistant/memory_ledger";
 import type { CandidateSignalSnapshot } from "@/lib/assistant/signal_extractor";
 
@@ -84,5 +88,37 @@ describe("pass conditions", () => {
     const relevant = selectRelevantPassAssessment("tradeoff", "TESTING_AND_COMPLEXITY", assessment);
     expect(relevant.topic).toBe("complexity");
     expect(relevant.passConditions).toContain("time_complexity_stated");
+  });
+
+  it("forbids jumping to deep dive before capacity when scaling context is active", () => {
+    const guarded = guardSystemDesignStageTransition({
+      currentStage: "CAPACITY",
+      suggestedStage: "DEEP_DIVE",
+      transcripts: [
+        {
+          speaker: "USER",
+          text: "High level architecture includes api gateway, services, cache, replicas, and sharded databases. We need to scale across regions but I have not done QPS estimates yet.",
+        },
+      ],
+      events: [],
+    });
+
+    expect(guarded).toBe("CAPACITY");
+  });
+
+  it("allows deep dive without forcing capacity when scaling context is not active", () => {
+    const guarded = guardSystemDesignStageTransition({
+      currentStage: "HIGH_LEVEL",
+      suggestedStage: "DEEP_DIVE",
+      transcripts: [
+        {
+          speaker: "USER",
+          text: "High level architecture has api gateway, service layer, and database components with clear data flow.",
+        },
+      ],
+      events: [],
+    });
+
+    expect(guarded).toBe("DEEP_DIVE");
   });
 });

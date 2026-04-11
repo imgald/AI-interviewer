@@ -94,7 +94,7 @@ describe("hinting_ledger", () => {
         summary: "Implementation stalled.",
         reasoningDepth: "moderate",
         testingDiscipline: "partial",
-        complexityRigor: "moderate",
+        complexityRigor: "partial",
         readyToCode: true,
       },
     });

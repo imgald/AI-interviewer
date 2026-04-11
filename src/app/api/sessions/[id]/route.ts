@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { fail, ok } from "@/lib/http";
-import { deriveCurrentCodingStage } from "@/lib/assistant/stages";
+import { deriveCurrentCodingStage, deriveCurrentSystemDesignStage } from "@/lib/assistant/stages";
 import {
   buildTranscriptVersionIndex,
   decorateTranscriptForRead,
@@ -58,11 +58,17 @@ export async function GET(_: Request, { params }: RouteContext) {
   const transcriptVersionIndex = buildTranscriptVersionIndex(session.transcripts, truthEvents);
   const committedTranscripts = getCommittedTranscriptSegments(session.transcripts, truthEvents);
   const transcriptTruth = summarizeTranscriptTruth(session.transcripts, truthEvents);
-  const currentStage = deriveCurrentCodingStage({
-    events: truthEvents,
-    transcripts: committedTranscripts,
-    latestExecutionRun: session.executionRuns[0] ?? null,
-  });
+  const currentStage =
+    session.mode === "SYSTEM_DESIGN"
+      ? deriveCurrentSystemDesignStage({
+          events: truthEvents,
+          transcripts: committedTranscripts,
+        })
+      : deriveCurrentCodingStage({
+          events: truthEvents,
+          transcripts: committedTranscripts,
+          latestExecutionRun: session.executionRuns[0] ?? null,
+        });
   const lowCostMode = resolveLowCostMode(session.events);
   const usageSummary = summarizeUsageFromSessionEvents(session.events);
 

@@ -13,6 +13,8 @@ import {
 import { isCodingInterviewStage } from "@/lib/assistant/stages";
 import { prisma } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 type ReportPageProps = {
   params: Promise<{ id: string }>;
 };
@@ -387,6 +389,7 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
 
   const reportJson = asReportJson(session.feedbackReport.reportJson);
   const snapshotState = buildSessionSnapshotState({
+    mode: session.mode,
     currentStage: typeof reportJson.currentStage === "string" ? reportJson.currentStage : null,
     events: session.events,
     candidateStateSnapshots: candidateStateSnapshots,

@@ -49,6 +49,7 @@ type TrajectorySnapshotRow = {
 };
 
 export type SessionSnapshotState = {
+  mode: "CODING" | "SYSTEM_DESIGN";
   currentStage: CodingInterviewStage;
   currentStageLabel: string;
   stageJourney: string[];
@@ -163,6 +164,7 @@ function latestExecutionRunFromEvents(events: SessionEventLike[], executionRuns?
 }
 
 export function buildSessionSnapshotState(input: {
+  mode?: string | null;
   currentStage?: string | null;
   events: SessionEventLike[];
   candidateStateSnapshots?: CandidateSnapshotRow[];
@@ -275,6 +277,7 @@ export function buildSessionSnapshotState(input: {
       : null;
 
   return {
+    mode: input.mode === "SYSTEM_DESIGN" ? "SYSTEM_DESIGN" : "CODING",
     currentStage,
     currentStageLabel: describeCodingStage(currentStage),
     stageJourney: stageJourney.map((stage) => describeCodingStage(stage)),
