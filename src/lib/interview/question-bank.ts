@@ -13,7 +13,7 @@ export type QuestionBankEntry = {
   prompt: string;
   difficulty: Difficulty;
   companyStyle: CompanyStyle;
-  levelTarget: TargetLevel;
+  levelTarget?: TargetLevel | null;
   estimatedMinutes: number;
   topicTags: string[];
 };
@@ -170,6 +170,60 @@ const BASE_QUESTION_BANK: QuestionBankEntry[] = [
     levelTarget: TargetLevel.SDE2,
     estimatedMinutes: 30,
     topicTags: ["design", "hash-map", "string"],
+  },
+  {
+    type: QuestionType.SYSTEM_DESIGN,
+    title: "Design Dropbox",
+    slug: "system-design-dropbox",
+    prompt: [
+      "Design a Dropbox-like file storage and synchronization system.",
+      "",
+      "Scope:",
+      "- Users can upload/download files across devices.",
+      "- Files automatically sync after local changes.",
+      "- Users can share links to files/folders.",
+      "",
+      "What to cover in the interview:",
+      "- Functional requirements and non-functional goals (availability, durability, latency).",
+      "- Core APIs (upload, download, metadata fetch, sync updates, share link).",
+      "- High-level architecture and data flow.",
+      "- Storage choices for metadata vs blob/object content.",
+      "- Sync model, conflict handling, and consistency decisions.",
+      "- Capacity estimates (traffic/storage growth) when scaling concerns are discussed.",
+      "- Reliability risks (SPOF) and bottlenecks with mitigation.",
+    ].join("\n"),
+    difficulty: Difficulty.MEDIUM,
+    companyStyle: GENERIC,
+    levelTarget: null,
+    estimatedMinutes: 50,
+    topicTags: ["system-design", "storage", "sync", "distributed-systems", "api-design"],
+  },
+  {
+    type: QuestionType.SYSTEM_DESIGN,
+    title: "Design Gopuff Local Delivery Service",
+    slug: "system-design-gopuff-local-delivery",
+    prompt: [
+      "Design a Gopuff-style local delivery platform backed by micro-fulfillment centers.",
+      "",
+      "Scope:",
+      "- Users browse nearby inventory and place orders.",
+      "- System routes order to a local warehouse and dispatches a courier.",
+      "- Users can track order status in near real time.",
+      "",
+      "What to cover in the interview:",
+      "- Functional requirements and non-functional goals (freshness, latency, reliability, cost).",
+      "- Core APIs (catalog query, inventory check, order create, order status tracking).",
+      "- High-level architecture and data flow across catalog, inventory, checkout, dispatch, tracking.",
+      "- Inventory consistency and anti-oversell strategy.",
+      "- Multi-warehouse routing and fallback behavior.",
+      "- Capacity estimates once scaling/throughput concerns are in scope.",
+      "- SPOF and bottleneck analysis plus mitigations.",
+    ].join("\n"),
+    difficulty: Difficulty.MEDIUM,
+    companyStyle: GENERIC,
+    levelTarget: null,
+    estimatedMinutes: 50,
+    topicTags: ["system-design", "local-delivery", "inventory", "consistency", "api-design"],
   },
   {
     type: QuestionType.CODING,

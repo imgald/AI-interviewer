@@ -481,7 +481,6 @@ describe("POST /api/sessions", () => {
         type: "SYSTEM_DESIGN",
         isActive: true,
         companyStyle: "GENERIC",
-        levelTarget: "SDE2",
       },
       orderBy: { createdAt: "asc" },
     });

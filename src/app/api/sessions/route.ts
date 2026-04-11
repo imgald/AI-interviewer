@@ -22,7 +22,7 @@ async function findQuestionForSession(input: CreateSessionInput) {
   const baseWhere = {
     type: input.mode,
     isActive: true,
-    ...(input.targetLevel ? { levelTarget: input.targetLevel } : {}),
+    ...(input.mode === "CODING" && input.targetLevel ? { levelTarget: input.targetLevel } : {}),
   };
 
   if (input.companyStyle && input.companyStyle !== CompanyStyle.GENERIC) {

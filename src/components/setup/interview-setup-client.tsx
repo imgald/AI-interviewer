@@ -111,6 +111,12 @@ const selectOptions = {
   companyStyle: ["GENERIC", "AMAZON", "META", "GOOGLE", "STRIPE"] as const,
 };
 
+const systemDesignLevelOptions: Array<{ label: string; value: SetupFormState["targetLevel"] }> = [
+  { label: "Mid-Level", value: "SDE2" },
+  { label: "Senior", value: "SENIOR" },
+  { label: "Staff", value: "STAFF" },
+];
+
 const initialForm: SetupFormState = {
   mode: "CODING",
   targetLevel: "SDE2",
@@ -130,6 +136,17 @@ export function InterviewSetupClient() {
   const canStartTailored = personaState.kind === "persona_ready";
   const hasUrl = form.interviewerProfileUrl.trim().length > 0;
   const isSessionCreating = personaState.kind === "session_creating";
+  const isSystemDesignMode = form.mode === "SYSTEM_DESIGN";
+
+  useEffect(() => {
+    if (!isSystemDesignMode) {
+      return;
+    }
+
+    if (!systemDesignLevelOptions.some((option) => option.value === form.targetLevel)) {
+      setForm((current) => ({ ...current, targetLevel: "SDE2" }));
+    }
+  }, [form.targetLevel, isSystemDesignMode]);
 
   useEffect(() => {
     if (personaState.kind !== "persona_processing" && personaState.kind !== "persona_queued") {
@@ -333,8 +350,9 @@ export function InterviewSetupClient() {
             </p>
             <h1 style={{ margin: 0, fontSize: "clamp(2rem, 4vw, 3rem)" }}>Configure your mock interview.</h1>
             <p style={{ margin: 0, color: "var(--muted)", maxWidth: 760 }}>
-              This MVP creates a coding-first interview session, with an optional public interviewer profile
-              that nudges topic emphasis and follow-up style.
+              {isSystemDesignMode
+                ? "System design depth is controlled by the level you choose below. The interviewer adapts prompts and pressure to that level."
+                : "This MVP creates a coding-first interview session, with an optional public interviewer profile that nudges topic emphasis and follow-up style."}
             </p>
           </div>
         </section>
@@ -356,17 +374,50 @@ export function InterviewSetupClient() {
             </Field>
 
             <Field label="Target Level">
-              <select
-                value={form.targetLevel}
-                onChange={(event) => updateField("targetLevel", event.target.value as SetupFormState["targetLevel"])}
-                style={inputStyle}
-              >
-                {selectOptions.targetLevel.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
+              {isSystemDesignMode ? (
+                <div
+                  style={{
+                    display: "inline-flex",
+                    border: "1px solid var(--border)",
+                    borderRadius: 14,
+                    overflow: "hidden",
+                    background: "#fff",
+                  }}
+                >
+                  {systemDesignLevelOptions.map((option) => {
+                    const selected = form.targetLevel === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => updateField("targetLevel", option.value)}
+                        style={{
+                          border: "none",
+                          padding: "10px 18px",
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          background: selected ? "var(--accent)" : "transparent",
+                          color: selected ? "#fff" : "var(--text)",
+                        }}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <select
+                  value={form.targetLevel}
+                  onChange={(event) => updateField("targetLevel", event.target.value as SetupFormState["targetLevel"])}
+                  style={inputStyle}
+                >
+                  {selectOptions.targetLevel.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              )}
             </Field>
 
             <Field label="Company Style">
@@ -413,7 +464,9 @@ export function InterviewSetupClient() {
               fontSize: 14,
             }}
           >
-            Language is chosen inside the interview room. Question selection now prefers company-tagged questions first and falls back to generic ones when needed.
+            {isSystemDesignMode
+              ? "For system design, the selected level controls interview depth. Question selection is no longer constrained by question-level metadata."
+              : "Language is chosen inside the interview room. Question selection now prefers company-tagged questions first and falls back to generic ones when needed."}
           </div>
 
           <section style={panelStyle}>

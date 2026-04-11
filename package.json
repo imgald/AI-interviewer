@@ -19,6 +19,7 @@
     "eval:policies": "tsx src/scripts/eval-policies.ts"
   },
   "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.0",
     "@monaco-editor/react": "^4.7.0",
     "@prisma/client": "^6.5.0",
     "bullmq": "^5.56.7",

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { InterviewRoomClient } from "@/components/interview/interview-room-client";
-import { deriveCurrentCodingStage } from "@/lib/assistant/stages";
+import { deriveCurrentCodingStage, deriveCurrentSystemDesignStage } from "@/lib/assistant/stages";
 import { prisma } from "@/lib/db";
 import { getQuestionPromptByTitle } from "@/lib/interview/question-bank";
 import { getCommittedTranscriptSegments } from "@/lib/session/commit-arbiter";
@@ -73,7 +73,10 @@ export default async function InterviewRoomPage({ params }: InterviewRoomPagePro
   const committedTranscripts = getCommittedTranscriptSegments(session.transcripts, truthEvents);
   const initialStage =
     session.mode === "SYSTEM_DESIGN"
-      ? "PROBLEM_UNDERSTANDING"
+      ? deriveCurrentSystemDesignStage({
+          events: truthEvents,
+          transcripts: committedTranscripts,
+        })
       : deriveCurrentCodingStage({
           events: truthEvents,
           transcripts: committedTranscripts,

@@ -5,11 +5,17 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   deriveCurrentCodingStage,
+  deriveCurrentSystemDesignStage,
   describeCodingStage,
+  describeSystemDesignStage,
+  describeInterviewStage,
   isCodingInterviewStage,
+  isSystemDesignStage,
   type CodingInterviewStage,
+  type SystemDesignStage,
 } from "@/lib/assistant/stages";
 import { getStarterCode, isRunnableLanguage, normalizeLanguage, toMonacoLanguage } from "@/lib/interview/editor";
+import { SystemDesignWhiteboard } from "@/components/interview/system-design-whiteboard";
 import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
 import { summarizeUsageFromSessionEvents } from "@/lib/usage/cost";
 import { BrowserVoiceAdapter } from "@/lib/voice/browser-voice-adapter";
@@ -127,7 +133,7 @@ type InterviewRoomClientProps = {
   appliedPromptContext: string | null;
   lowCostMode: boolean;
   initialUsageSummary: UsageSummary;
-  initialStage: CodingInterviewStage;
+  initialStage: string;
   initialTranscripts: TranscriptSegment[];
   initialEvents: SessionEvent[];
 };
@@ -523,9 +529,17 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
   const latestRun = executionRuns[0] ?? null;
   const isDebugMode = viewMode === "debug";
   const isInterviewMode = viewMode === "interview";
+  const isSystemDesignMode = props.mode === "SYSTEM_DESIGN";
   const currentStage = useMemo(() => {
     if (events.length === 0 && transcripts.length === 0 && !latestRun) {
       return props.initialStage;
+    }
+
+    if (isSystemDesignMode) {
+      return deriveCurrentSystemDesignStage({
+        events,
+        transcripts,
+      });
     }
 
     return deriveCurrentCodingStage({
@@ -533,7 +547,17 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
       transcripts,
       latestExecutionRun: latestRun,
     });
-  }, [events, latestRun, props.initialStage, transcripts]);
+  }, [events, isSystemDesignMode, latestRun, props.initialStage, transcripts]);
+
+  const currentStageLabel = useMemo(() => {
+    if (isSystemDesignStage(currentStage)) {
+      return describeSystemDesignStage(currentStage);
+    }
+    if (isCodingInterviewStage(currentStage)) {
+      return describeCodingStage(currentStage);
+    }
+    return describeInterviewStage(currentStage) ?? currentStage;
+  }, [currentStage]);
 
   const lastAiSource = useMemo(() => {
     const latestAiEvent = [...events]
@@ -596,6 +620,10 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
   }
 
   function isActivelyCoding() {
+    if (isSystemDesignMode) {
+      return false;
+    }
+
     const activeCodingStage = currentStage === "IMPLEMENTATION" || currentStage === "DEBUGGING";
     if (!activeCodingStage) {
       return false;
@@ -605,6 +633,10 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
   }
 
   function currentVoiceFlowMode(): "discussion" | "coding" | "debugging" | "wrap_up" {
+    if (isSystemDesignMode) {
+      return "discussion";
+    }
+
     if (currentStage === "IMPLEMENTATION") {
       return "coding";
     }
@@ -1492,9 +1524,11 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
           </div>
           <div style={{ color: "var(--muted)", display: "grid", gap: 6, justifyItems: "end" }}>
             <div>
-              {props.mode} · {editorLanguageLabel(selectedLanguage)} · {props.targetLevel ?? "Unspecified"}
+              {isSystemDesignMode
+                ? `${props.mode} · ${props.targetLevel ?? "Unspecified"}`
+                : `${props.mode} · ${editorLanguageLabel(selectedLanguage)} · ${props.targetLevel ?? "Unspecified"}`}
             </div>
-            <div>Stage: {describeCodingStage(currentStage)}</div>
+            <div>Stage: {currentStageLabel}</div>
             <div>{props.personaEnabled ? "Persona-tailored" : "Generic interviewer"}</div>
           </div>
         </header>
@@ -1536,7 +1570,7 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
               })}
               tone="neutral"
             />
-            <StatusPill label={`Stage: ${describeCodingStage(currentStage)}`} tone="neutral" />
+            <StatusPill label={`Stage: ${currentStageLabel}`} tone="neutral" />
             <StatusPill label={props.lowCostMode ? "Low-cost mode on" : "Standard cost mode"} tone="warning" />
             {isContinuousListening ? <StatusPill label="Continuous Listening On" tone="success" /> : null}
             {isAssistantThinking ? <StatusPill label="AI Generating" tone="info" /> : null}
@@ -1579,7 +1613,7 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
                     <StatusPill label={props.mode} tone="neutral" />
                     <StatusPill label={props.targetLevel ?? "Unspecified"} tone="neutral" />
-                    <StatusPill label={describeCodingStage(currentStage)} tone="info" />
+                    <StatusPill label={currentStageLabel} tone="info" />
                   </div>
                 </div>
                 <div
@@ -1651,7 +1685,7 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
                 {props.personaSummary ?? "Generic interviewer persona for now."}
               </p>
               <p style={{ margin: "10px 0 0", color: "var(--text)", fontWeight: 600 }}>
-                Current stage: {describeCodingStage(currentStage)}
+                Current stage: {currentStageLabel}
               </p>
               {props.appliedPromptContext ? (
                 <p style={{ marginBottom: 0, fontSize: 14, color: "var(--muted)" }}>
@@ -1993,29 +2027,35 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
           >
             <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
               <div>
-                <strong>Code Workspace</strong>
-                <div style={{ color: "var(--muted)", fontSize: 14 }}>{editorStatus}</div>
+                <strong>{isSystemDesignMode ? "System Design Whiteboard" : "Code Workspace"}</strong>
+                <div style={{ color: "var(--muted)", fontSize: 14 }}>
+                  {isSystemDesignMode
+                    ? "Use the whiteboard to structure requirements, APIs, architecture, and tradeoffs."
+                    : editorStatus}
+                </div>
               </div>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                {isInterviewMode ? (
-                  <select
-                    value={selectedLanguage}
-                    onChange={(event) => setSelectedLanguage(event.target.value)}
-                    style={{ ...roomSelectStyle, width: 160 }}
-                  >
-                    {["Python", "Java", "C++", "JavaScript"].map((language) => (
-                      <option key={language} value={language}>
-                        {language}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <StatusPill label={editorLanguageLabel(selectedLanguage)} tone="neutral" />
-                )}
-                <button style={actionButtonStyle} disabled={isRunningCode} onClick={() => void runCode()}>
-                  {isRunningCode ? "Running..." : "Run Code"}
-                </button>
-              </div>
+              {!isSystemDesignMode ? (
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  {isInterviewMode ? (
+                    <select
+                      value={selectedLanguage}
+                      onChange={(event) => setSelectedLanguage(event.target.value)}
+                      style={{ ...roomSelectStyle, width: 160 }}
+                    >
+                      {["Python", "Java", "C++", "JavaScript"].map((language) => (
+                        <option key={language} value={language}>
+                          {language}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <StatusPill label={editorLanguageLabel(selectedLanguage)} tone="neutral" />
+                  )}
+                  <button style={actionButtonStyle} disabled={isRunningCode} onClick={() => void runCode()}>
+                    {isRunningCode ? "Running..." : "Run Code"}
+                  </button>
+                </div>
+              ) : null}
             </div>
 
             {isInterviewMode ? (
@@ -2064,32 +2104,39 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
               </div>
             ) : null}
 
-            <div
-              style={{
-                minHeight: isInterviewMode ? 620 : 360,
-                borderRadius: 18,
-                border: "1px solid var(--border)",
-                overflow: "hidden",
-              }}
-            >
-              <MonacoEditor
-                height={isInterviewMode ? "620px" : "360px"}
-                language={monacoLanguage}
-                theme="vs-dark"
-                value={editorCode}
-                onChange={(value) => {
-                  const nextCode = value ?? "";
-                  markEditorActivity(nextCode);
-                  setEditorCode(nextCode);
+            {isSystemDesignMode ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                <SystemDesignStageRail currentStage={currentStage} />
+                <SystemDesignWhiteboard />
+              </div>
+            ) : (
+              <div
+                style={{
+                  minHeight: isInterviewMode ? 620 : 360,
+                  borderRadius: 18,
+                  border: "1px solid var(--border)",
+                  overflow: "hidden",
                 }}
-                options={{
-                  minimap: { enabled: false },
-                  fontSize: 14,
-                  scrollBeyondLastLine: false,
-                  wordWrap: "on",
-                }}
-              />
-            </div>
+              >
+                <MonacoEditor
+                  height={isInterviewMode ? "620px" : "360px"}
+                  language={monacoLanguage}
+                  theme="vs-dark"
+                  value={editorCode}
+                  onChange={(value) => {
+                    const nextCode = value ?? "";
+                    markEditorActivity(nextCode);
+                    setEditorCode(nextCode);
+                  }}
+                  options={{
+                    minimap: { enabled: false },
+                    fontSize: 14,
+                    scrollBeyondLastLine: false,
+                    wordWrap: "on",
+                  }}
+                />
+              </div>
+            )}
 
             <div
               style={{
@@ -2170,35 +2217,37 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
               </div>
             ) : null}
 
-            <div
-              style={{
-                padding: 16,
-                borderRadius: 16,
-                background: "var(--surface-alt)",
-                border: "1px solid var(--border)",
-                display: "grid",
-                gap: 12,
-              }}
-            >
-              <strong>Latest Run</strong>
-              {latestRun ? (
-                <>
-                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", color: "var(--muted)", fontSize: 14 }}>
-                    <span>Status: {latestRun.status}</span>
-                    <span>Runtime: {latestRun.runtimeMs ?? 0}ms</span>
-                    {latestRun.codeSnapshot ? (
-                      <span>Snapshot #{latestRun.codeSnapshot.snapshotIndex}</span>
-                    ) : null}
-                  </div>
-                  <OutputBlock title="stdout" value={latestRun.stdout} />
-                  <OutputBlock title="stderr" value={latestRun.stderr} />
-                </>
-              ) : (
-                <span style={{ color: "var(--muted)" }}>
-                  No code runs yet. Execute the current editor contents to create a code snapshot and runtime record.
-                </span>
-              )}
-            </div>
+            {!isSystemDesignMode ? (
+              <div
+                style={{
+                  padding: 16,
+                  borderRadius: 16,
+                  background: "var(--surface-alt)",
+                  border: "1px solid var(--border)",
+                  display: "grid",
+                  gap: 12,
+                }}
+              >
+                <strong>Latest Run</strong>
+                {latestRun ? (
+                  <>
+                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", color: "var(--muted)", fontSize: 14 }}>
+                      <span>Status: {latestRun.status}</span>
+                      <span>Runtime: {latestRun.runtimeMs ?? 0}ms</span>
+                      {latestRun.codeSnapshot ? (
+                        <span>Snapshot #{latestRun.codeSnapshot.snapshotIndex}</span>
+                      ) : null}
+                    </div>
+                    <OutputBlock title="stdout" value={latestRun.stdout} />
+                    <OutputBlock title="stderr" value={latestRun.stderr} />
+                  </>
+                ) : (
+                  <span style={{ color: "var(--muted)" }}>
+                    No code runs yet. Execute the current editor contents to create a code snapshot and runtime record.
+                  </span>
+                )}
+              </div>
+            ) : null}
 
             {reportSummary ? (
               <div
@@ -2666,10 +2715,10 @@ function asStringArray(value: unknown) {
 function formatStageTransition(payloadJson: unknown) {
   const payload =
     typeof payloadJson === "object" && payloadJson !== null ? (payloadJson as Record<string, unknown>) : {};
-  const previousStage = isCodingInterviewStage(payload.previousStage)
-    ? describeCodingStage(payload.previousStage)
-    : null;
-  const stage = isCodingInterviewStage(payload.stage) ? describeCodingStage(payload.stage) : null;
+  const previousStage = describeInterviewStage(
+    typeof payload.previousStage === "string" ? payload.previousStage : null,
+  );
+  const stage = describeInterviewStage(typeof payload.stage === "string" ? payload.stage : null);
 
   if (previousStage && stage) {
     return `${previousStage} -> ${stage}`;
@@ -2680,6 +2729,48 @@ function formatStageTransition(payloadJson: unknown) {
   }
 
   return "Stage transition recorded.";
+}
+
+function SystemDesignStageRail({ currentStage }: { currentStage: string }) {
+  const stages: SystemDesignStage[] = [
+    "REQUIREMENTS",
+    "API_CONTRACT_CHECK",
+    "HIGH_LEVEL",
+    "CAPACITY",
+    "DEEP_DIVE",
+    "REFINEMENT",
+    "WRAP_UP",
+  ];
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 8,
+        flexWrap: "wrap",
+      }}
+    >
+      {stages.map((stage) => {
+        const active = currentStage === stage;
+        return (
+          <span
+            key={stage}
+            style={{
+              borderRadius: 999,
+              border: "1px solid var(--border)",
+              padding: "6px 10px",
+              fontSize: 12,
+              fontWeight: 700,
+              background: active ? "var(--accent)" : "var(--surface-alt)",
+              color: active ? "#fff" : "var(--muted)",
+            }}
+          >
+            {describeSystemDesignStage(stage)}
+          </span>
+        );
+      })}
+    </div>
+  );
 }
 
 function voiceTone(state: BrowserVoiceState): "neutral" | "success" | "warning" | "info" | "danger" {
