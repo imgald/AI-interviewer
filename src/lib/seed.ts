@@ -15,13 +15,17 @@ export async function ensureSeedData() {
     });
   }
 
-  await Promise.all(
-    QUESTION_BANK.map((question) =>
-      prisma.question.upsert({
-        where: { slug: question.slug },
-        update: question,
-        create: question,
-      }),
-    ),
-  );
+  const batchSize = 25;
+  for (let index = 0; index < QUESTION_BANK.length; index += batchSize) {
+    const batch = QUESTION_BANK.slice(index, index + batchSize);
+    await prisma.$transaction(
+      batch.map((question) =>
+        prisma.question.upsert({
+          where: { slug: question.slug },
+          update: question,
+          create: question,
+        }),
+      ),
+    );
+  }
 }
