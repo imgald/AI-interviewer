@@ -1147,6 +1147,26 @@ Concrete work:
 - continue semantic silence handling for think-aloud cues
 - keep TTS strongly bound to committed transcript output
 
+Status: `Completed`
+
+Phase 6 implementation summary:
+- thinking lead-in latency now scales with decision complexity instead of only action label:
+  - stream meta now emits `decisionComplexity`
+  - lead-in delay now uses decision complexity + conversation health mode (`NORMAL/CONSTRAINED/GUIDED/RESCUE/TERMINATE_OR_REPLAN`)
+- streaming voice delivery now emits a deterministic speech mode:
+  - `stream_draft` for low-complexity turns
+  - `commit_only` for high-complexity turns
+- interview room TTS now honors speech mode:
+  - in `commit_only`, the room does not speak stream deltas
+  - it speaks only the final committed assistant transcript on `done`
+- semantic silence handling was tightened:
+  - browser speech auto-submit now correctly applies think-aloud/negative-intent bias in the non-provider branch as well
+
+Exit criteria met:
+- no transcript/voice truth-boundary regression in high-complexity turns because TTS can be forced to committed-only playback
+- delivery pacing is now complexity-aware and still deterministic/replayable
+- think-aloud protection remains active across both provider and browser-driven speech paths
+
 Success criteria:
 - no抢话 / double-voice / transcript mismatch regressions
 - voice and UX polish never override truth or observability

@@ -130,6 +130,8 @@ export type StreamingAssistantTurnChunk = {
     thinkingDelayMs: number;
     action?: string;
     pressure?: string;
+    decisionComplexity?: number;
+    speechCommitMode?: "stream_draft" | "commit_only";
   };
 };
 
@@ -207,15 +209,21 @@ export async function* streamAssistantTurn(
     latestExecutionRun: input.latestExecutionRun,
   });
   const { decision, intent, trajectory, candidateDna, shadowPolicy } = buildDecision(input, signals);
+  const decisionComplexity = assessDecisionComplexity(decision);
+  const speechCommitMode = decisionComplexity >= 0.6 ? "commit_only" : "stream_draft";
   yield {
     meta: {
       thinkingDelayMs: resolveAssistantLeadInDelayMs({
         action: decision.action,
         pressure: decision.pressure,
         lowCostMode: input.lowCostMode,
+        decisionComplexity,
+        conversationHealthMode: decision.conversationHealthMode,
       }),
       action: decision.action,
       pressure: decision.pressure,
+      decisionComplexity,
+      speechCommitMode,
     },
   };
   let providerFailure: GenerateAssistantTurnResult["providerFailure"] | undefined;
@@ -2173,6 +2181,48 @@ function calculateReplyTokenOverlap(left: string, right: string) {
   }
 
   return overlap / Math.max(leftTokens.size, rightTokens.size);
+}
+
+function assessDecisionComplexity(decision: CandidateDecision) {
+  const candidateScores = decision.candidateScores ?? [];
+  const sortedScores = candidateScores
+    .map((item) => Number(item.totalScore))
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => right - left);
+  const topScore = sortedScores[0] ?? 0;
+  const secondScore = sortedScores[1] ?? topScore;
+  const edge = Math.max(0, topScore - secondScore);
+  const scoreAmbiguity = Math.max(0, Math.min(1, (0.25 - edge) / 0.25));
+  const lowConfidence = Math.max(0, Math.min(1, (0.8 - decision.confidence) / 0.8));
+  const fragileDecisionSurface =
+    decision.normalizedAction === "Guide" || decision.normalizedAction === "Probe" ? 0.1 : 0;
+  const conversationPenalty =
+    decision.conversationHealthMode === "TERMINATE_OR_REPLAN"
+      ? 0.42
+      : decision.conversationHealthMode === "RESCUE"
+        ? 0.28
+        : decision.conversationHealthMode === "GUIDED"
+          ? 0.18
+          : decision.conversationHealthMode === "CONSTRAINED"
+            ? 0.1
+            : 0;
+  const echoPenalty = decision.echoRecoveryMode ? 0.12 : 0;
+
+  return Number(
+    Math.min(
+      1,
+      Math.max(
+        0,
+        (
+          scoreAmbiguity * 0.42 +
+          lowConfidence * 0.24 +
+          fragileDecisionSurface +
+          conversationPenalty +
+          echoPenalty
+        ),
+      ),
+    ).toFixed(2),
+  );
 }
 
 function toDecisionJustificationFields(justification: {

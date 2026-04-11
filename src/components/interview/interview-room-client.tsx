@@ -28,7 +28,7 @@ import {
   isLowSignalUtterance,
   shouldIgnoreInterruptedUtterance,
 } from "@/lib/voice/turn-taking";
-import { resolveAssistantSpeechRemainder } from "@/lib/voice/assistant-stream";
+import { resolveAssistantSpeechRemainder, resolveAuthoritativeAssistantReply } from "@/lib/voice/assistant-stream";
 import type { BrowserVoiceState, InterviewVoiceAdapter, VoiceAvailability } from "@/lib/voice/types";
 import { describeRoomSystemState, describeVoiceState } from "@/lib/voice/voice-status";
 
@@ -827,6 +827,7 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
       interruptedRecently: interruptedRecently(),
       activeCoding: isActivelyCoding(),
       flowMode: currentVoiceFlowMode(),
+      negativeIntent,
     });
 
     if (delayMs === null) {
@@ -1024,6 +1025,7 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
       let buffer = "";
       let accumulated = "";
       let spokenIndex = 0;
+      let speechCommitMode: "stream_draft" | "commit_only" = "stream_draft";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -1046,19 +1048,26 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
             accumulated += text;
             setAssistantDraft(accumulated);
 
-            const readyToSpeak = extractSpeakableText(accumulated, spokenIndex);
-            if (readyToSpeak.text) {
-              await waitForAssistantLeadInIfNeeded();
-              spokenIndex = readyToSpeak.nextIndex;
-              await voiceAdapterRef.current?.speakText(readyToSpeak.text);
+            if (speechCommitMode !== "commit_only") {
+              const readyToSpeak = extractSpeakableText(accumulated, spokenIndex);
+              if (readyToSpeak.text) {
+                await waitForAssistantLeadInIfNeeded();
+                spokenIndex = readyToSpeak.nextIndex;
+                await voiceAdapterRef.current?.speakText(readyToSpeak.text);
+              }
             }
           }
 
           if (parsed.event === "meta") {
             assistantLeadInDelayMsRef.current =
               typeof parsed.data?.thinkingDelayMs === "number" ? parsed.data.thinkingDelayMs : 0;
+            speechCommitMode =
+              parsed.data?.speechCommitMode === "commit_only" ? "commit_only" : "stream_draft";
             if (assistantLeadInDelayMsRef.current > 260) {
               setRoomNotice("The interviewer is taking a short beat to frame the next question.");
+            }
+            if (speechCommitMode === "commit_only") {
+              setRoomNotice("The interviewer is drafting silently and will speak only the committed final reply.");
             }
           }
 
@@ -1114,15 +1123,27 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
               );
             }
 
-            const remainingAuthoritativeSpeech = resolveAssistantSpeechRemainder({
-              streamedDraft: accumulated,
-              finalTranscriptText: finalTranscript?.text,
-              spokenIndex,
-            });
+            if (speechCommitMode === "commit_only") {
+              const authoritativeSpeech = resolveAuthoritativeAssistantReply({
+                streamedDraft: accumulated,
+                finalTranscriptText: finalTranscript?.text,
+              });
 
-            if (remainingAuthoritativeSpeech) {
-              await waitForAssistantLeadInIfNeeded();
-              await voiceAdapterRef.current?.speakText(remainingAuthoritativeSpeech);
+              if (authoritativeSpeech) {
+                await waitForAssistantLeadInIfNeeded();
+                await voiceAdapterRef.current?.speakText(authoritativeSpeech);
+              }
+            } else {
+              const remainingAuthoritativeSpeech = resolveAssistantSpeechRemainder({
+                streamedDraft: accumulated,
+                finalTranscriptText: finalTranscript?.text,
+                spokenIndex,
+              });
+
+              if (remainingAuthoritativeSpeech) {
+                await waitForAssistantLeadInIfNeeded();
+                await voiceAdapterRef.current?.speakText(remainingAuthoritativeSpeech);
+              }
             }
           }
         }

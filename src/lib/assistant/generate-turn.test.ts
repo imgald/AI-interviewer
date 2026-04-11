@@ -598,7 +598,13 @@ describe("generateAssistantTurn", () => {
 
     const chunks: Array<{
       textDelta?: string;
-      meta?: { thinkingDelayMs?: number; action?: string; pressure?: string };
+      meta?: {
+        thinkingDelayMs?: number;
+        action?: string;
+        pressure?: string;
+        decisionComplexity?: number;
+        speechCommitMode?: "stream_draft" | "commit_only";
+      };
       final?: { reply: string; source: string };
     }> = [];
     for await (const chunk of streamAssistantTurn({
@@ -610,7 +616,13 @@ describe("generateAssistantTurn", () => {
       chunks.push(
         chunk as {
           textDelta?: string;
-          meta?: { thinkingDelayMs?: number; action?: string; pressure?: string };
+          meta?: {
+            thinkingDelayMs?: number;
+            action?: string;
+            pressure?: string;
+            decisionComplexity?: number;
+            speechCommitMode?: "stream_draft" | "commit_only";
+          };
           final?: { reply: string; source: string };
         },
       );
@@ -619,8 +631,50 @@ describe("generateAssistantTurn", () => {
     const metaChunk = chunks.find((chunk) => chunk.meta)?.meta;
     const finalChunk = chunks.find((chunk) => chunk.final)?.final;
     expect(metaChunk?.thinkingDelayMs).toBeGreaterThan(0);
+    expect(typeof metaChunk?.decisionComplexity).toBe("number");
+    expect(["stream_draft", "commit_only"]).toContain(metaChunk?.speechCommitMode);
     expect(finalChunk?.source).toBe("fallback");
     expect(finalChunk?.reply).toMatch(/example|starting point|step by step/i);
+  });
+
+  it("switches streaming speech mode to commit-only for high-complexity echo loops", async () => {
+    const chunks: Array<{
+      meta?: {
+        thinkingDelayMs?: number;
+        action?: string;
+        pressure?: string;
+        decisionComplexity?: number;
+        speechCommitMode?: "stream_draft" | "commit_only";
+      };
+    }> = [];
+
+    for await (const chunk of streamAssistantTurn({
+      mode: "CODING",
+      questionTitle: "Word Ladder",
+      questionPrompt: "Find shortest transformation sequence length.",
+      currentStage: "APPROACH_DISCUSSION",
+      recentTranscripts: [
+        {
+          speaker: "AI",
+          text: "Please summarize your approach in two sentences and state exact complexity.",
+        },
+        {
+          speaker: "USER",
+          text: "Please summarize your approach in two sentences and state exact complexity.",
+        },
+      ],
+      recentEvents: [
+        { eventType: "CANDIDATE_ECHO_DETECTED" },
+        { eventType: "CANDIDATE_ECHO_DETECTED" },
+        { eventType: "CANDIDATE_ECHO_DETECTED" },
+      ],
+    })) {
+      chunks.push(chunk as { meta?: { decisionComplexity?: number; speechCommitMode?: "stream_draft" | "commit_only" } });
+    }
+
+    const metaChunk = chunks.find((chunk) => chunk.meta)?.meta;
+    expect(metaChunk?.decisionComplexity).toBeGreaterThanOrEqual(0.6);
+    expect(metaChunk?.speechCommitMode).toBe("commit_only");
   });
 
   it("keeps the streamed question as the authoritative final reply when critic closure rewrites would materially change it", async () => {

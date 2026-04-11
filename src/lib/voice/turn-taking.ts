@@ -201,9 +201,15 @@ export function resolveAssistantLeadInDelayMs(input: {
   action?: string | null;
   pressure?: string | null;
   lowCostMode?: boolean;
+  decisionComplexity?: number | null;
+  conversationHealthMode?: string | null;
 }) {
   const action = typeof input.action === "string" ? input.action : "";
   const pressure = typeof input.pressure === "string" ? input.pressure : "";
+  const complexity =
+    typeof input.decisionComplexity === "number"
+      ? Math.max(0, Math.min(1, Number(input.decisionComplexity.toFixed(2))))
+      : 0;
   const key = `${action}:${pressure}`;
 
   let minDelay = 140;
@@ -231,7 +237,20 @@ export function resolveAssistantLeadInDelayMs(input: {
     maxDelay = Math.max(minDelay, maxDelay - 160);
   }
 
-  return minDelay + (stableHash(key) % Math.max(1, maxDelay - minDelay + 1));
+  const healthDelayBonus =
+    input.conversationHealthMode === "TERMINATE_OR_REPLAN"
+      ? 220
+      : input.conversationHealthMode === "RESCUE"
+        ? 160
+        : input.conversationHealthMode === "GUIDED"
+          ? 90
+          : input.conversationHealthMode === "CONSTRAINED"
+            ? 40
+            : 0;
+  const complexityDelayBonus = Math.round(380 * complexity);
+  const deterministicSpan = Math.max(1, maxDelay - minDelay + 1);
+  const baseDelay = minDelay + (stableHash(key) % deterministicSpan);
+  return Math.min(2200, baseDelay + healthDelayBonus + complexityDelayBonus);
 }
 
 export function normalizeUtterance(text: string) {

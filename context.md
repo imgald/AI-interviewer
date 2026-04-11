@@ -25,7 +25,12 @@
   - Current bank size is now above 300 total entries after variants.
 
 ## Current Task
-- `Phase 5` (`Policy Optimization Lab`) is now closed.
+- `Phase 6` (`Voice and UX Convergence`) is now closed.
+- Phase 6 completion summary:
+  - assistant streaming meta now includes decision complexity and speech commit mode
+  - thinking lead-in delay now scales with decision complexity and conversation health mode
+  - interview room now supports commit-only TTS playback for high-complexity turns (speak committed final transcript only)
+  - browser speech auto-submit now applies think-aloud negative-intent delay bias consistently
 - Phase 5 completion summary:
   - policy regression lab now runs deterministic multi-turn micro-simulations per archetype
   - each archetype result includes a decision timeline (`turn/action/target/score/reward/penalties`)
@@ -34,7 +39,7 @@
   - scenario set now includes `overconfident_wrong_answer` and `perfect_flow`
   - `/admin` Policy Regression Lab surfaces reward gaps, decision timelines, and tuning suggestions
 - Next task:
-  - move to `Phase 6` (`Voice and UX Convergence`) while preserving truth-boundary invariants
+  - post-phase tuning and hardening (no roadmap phase transition yet)
 - Keep pending follow-up tasks visible:
   - code-implementation probe trigger strengthening
   - additional echo recovery tuning under repeated non-answer patterns

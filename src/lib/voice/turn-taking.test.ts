@@ -144,5 +144,22 @@ describe("voice turn-taking policy", () => {
     expect(probeDelay).toBeGreaterThan(closeDelay);
     expect(probeDelay).toBeGreaterThanOrEqual(320);
   });
+
+  it("increases assistant lead-in when decision complexity is higher", () => {
+    const lowComplexity = resolveAssistantLeadInDelayMs({
+      action: "ask_for_clarification",
+      pressure: "neutral",
+      decisionComplexity: 0.1,
+      conversationHealthMode: "NORMAL",
+    });
+    const highComplexity = resolveAssistantLeadInDelayMs({
+      action: "ask_for_clarification",
+      pressure: "neutral",
+      decisionComplexity: 0.9,
+      conversationHealthMode: "RESCUE",
+    });
+
+    expect(highComplexity).toBeGreaterThan(lowComplexity);
+  });
 });
 
