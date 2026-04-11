@@ -902,6 +902,40 @@ describe("makeCandidateDecision", () => {
     expect(result.question).toMatch(/exactly two sentences|format|directly/i);
   });
 
+  it("escalates systemically when repeated candidate echoes create a loop", () => {
+    const repeated = "please summarize your approach with one sentence and complexity";
+    const result = makeCandidateDecision({
+      currentStage: "APPROACH_DISCUSSION",
+      policy: {
+        ...basePolicy,
+        currentStage: "APPROACH_DISCUSSION",
+        nextStage: "APPROACH_DISCUSSION",
+        recommendedAction: "PROBE_APPROACH",
+      },
+      signals: {
+        ...baseSignals,
+        echoLikely: true,
+        echoStrength: "high",
+        echoOverlapRatio: 0.92,
+        reasoningDepth: "thin",
+        communication: "mixed",
+      },
+      recentEvents: [
+        { eventType: "CANDIDATE_SPOKE", payloadJson: { text: repeated } },
+        { eventType: "CANDIDATE_ECHO_DETECTED", payloadJson: {} },
+        { eventType: "CANDIDATE_SPOKE", payloadJson: { text: repeated } },
+        { eventType: "CANDIDATE_ECHO_DETECTED", payloadJson: {} },
+        { eventType: "CANDIDATE_SPOKE", payloadJson: { text: repeated } },
+        { eventType: "CANDIDATE_ECHO_DETECTED", payloadJson: {} },
+      ],
+    });
+
+    expect(["RESCUE", "TERMINATE_OR_REPLAN"]).toContain(result.conversationHealthMode);
+    expect(["give_hint", "ask_for_clarification"]).toContain(result.action);
+    expect(result.question).toMatch(/loop|unstick|template|do not repeat|seed/i);
+    expect(result.question).not.toMatch(/summarize your approach/i);
+  });
+
   it("holds and listens when confidence is low but the candidate still has the floor", () => {
     const result = makeCandidateDecision({
       currentStage: "IMPLEMENTATION",

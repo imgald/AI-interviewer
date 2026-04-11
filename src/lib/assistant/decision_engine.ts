@@ -18,6 +18,7 @@ import {
   type HintRequestTiming,
   type MomentumAtHint,
 } from "@/lib/assistant/hint_strategy";
+import { assessConversationHealth } from "@/lib/assistant/conversation_health";
 import type { PolicyArchetype, PolicyConfig } from "@/lib/assistant/policy-config";
 import {
   decideInterviewerIntent,
@@ -154,6 +155,12 @@ export type CandidateDecision = {
   question: string;
   reason: string;
   confidence: number;
+  conversationHealthMode?: "NORMAL" | "CONSTRAINED" | "GUIDED" | "RESCUE" | "TERMINATE_OR_REPLAN";
+  conversationHealthScore?: number;
+  conversationNovelty?: number;
+  conversationEchoRate?: number;
+  conversationNoProgressTurns?: number;
+  conversationHealthReasons?: string[];
   echoRecoveryMode?: "restate_contract" | "constrained_prompt" | "narrow_format";
   echoRecoveryAttempt?: number;
   targetCodeLine?: string;
@@ -261,6 +268,10 @@ export function makeCandidateDecision(input: {
       latestExecutionRun,
       intent: resolvedIntent,
     });
+  const conversationHealth = assessConversationHealth({
+    recentEvents: input.recentEvents ?? [],
+    signals,
+  });
   const attachIntentTrajectory = (decision: CandidateDecision): CandidateDecision => {
     const relevantPassAssessment = selectRelevantPassAssessment(
       decision.target,
@@ -299,6 +310,12 @@ export function makeCandidateDecision(input: {
       passConditions: relevantPassAssessment.passConditions,
       missingPassConditions: relevantPassAssessment.missing,
       passConditionTopic: relevantPassAssessment.topic,
+      conversationHealthMode: conversationHealth.mode,
+      conversationHealthScore: conversationHealth.score,
+      conversationNovelty: conversationHealth.novelty,
+      conversationEchoRate: conversationHealth.echoRate,
+      conversationNoProgressTurns: conversationHealth.noProgressTurns,
+      conversationHealthReasons: conversationHealth.reasons,
     };
     return applyUnifiedDecisionScore(enrichedDecision, {
       currentStage,
@@ -315,22 +332,61 @@ export function makeCandidateDecision(input: {
 
   const recentEchoEvents = countRecentEventType(input.recentEvents ?? [], "CANDIDATE_ECHO_DETECTED");
   const echoRecoveryAttempt = Math.min(2, recentEchoEvents);
-  if (signals.echoLikely) {
-    if (echoRecoveryAttempt >= 1) {
+  if (conversationHealth.mode !== "NORMAL") {
+    if (conversationHealth.mode === "TERMINATE_OR_REPLAN") {
+      return attachIntentTrajectory({
+        action: "ask_for_clarification",
+        target: currentStage === "IMPLEMENTATION" ? "implementation" : "understanding",
+        question:
+          "We are stuck in a repetition loop. Reset and answer in your own words with this template only: Problem restatement (1 sentence), core algorithm (2 bullet points), complexity (1 line). If you are blocked, say exactly where you are blocked.",
+        reason:
+          "Conversation-health reached terminate-or-replan because echo and no-progress patterns persisted, so the interviewer must break the loop with a hard reset contract.",
+        confidence: 0.95,
+        echoRecoveryMode: "restate_contract",
+        echoRecoveryAttempt: echoRecoveryAttempt + 1,
+        targetCodeLine: "one non-repeated problem restatement and the exact blocking point, if any",
+        specificIssue: "Repeated echo/no-progress turns indicate the prior prompt pattern is no longer effective.",
+        expectedAnswer:
+          "A fresh restatement, two concrete algorithm bullets, and one explicit complexity line; or a precise blocked point.",
+        suggestedStage: currentStage === "IMPLEMENTATION" ? "IMPLEMENTATION" : "APPROACH_DISCUSSION",
+        policyAction: policy.recommendedAction,
+      });
+    }
+
+    if (conversationHealth.mode === "RESCUE") {
+      return attachIntentTrajectory({
+        action: "give_hint",
+        target: "reasoning",
+        question:
+          "Let me unstick this. Start from this seed and finish it: 'Use BFS from beginWord; each expansion changes one letter and stays in dictionary.' Now add one data structure you need and state time/space complexity in one line.",
+        reason:
+          "Conversation-health escalated to rescue mode, so the interviewer should provide a concrete starter instead of repeating the same request style.",
+        confidence: 0.91,
+        echoRecoveryMode: "narrow_format",
+        echoRecoveryAttempt: echoRecoveryAttempt + 1,
+        targetCodeLine: "the first BFS expansion step and one data structure choice",
+        specificIssue: "The candidate is looping on repeated wording and needs a starter scaffold to produce new evidence.",
+        expectedAnswer:
+          "One completed starter statement, one concrete data-structure choice, and explicit time/space complexity.",
+        suggestedStage: "APPROACH_DISCUSSION",
+        policyAction: policy.recommendedAction,
+      });
+    }
+
+    if (conversationHealth.mode === "GUIDED") {
       return attachIntentTrajectory({
         action: "ask_for_clarification",
         target: "reasoning",
         question:
-          "Please answer directly in exactly two sentences: sentence 1 states your algorithm and why it works; sentence 2 states time and space complexity.",
+          "Do not repeat my wording. Give three lines only: line 1 algorithm name, line 2 one key step on a tiny example, line 3 exact time and space complexity.",
         reason:
-          "The candidate appears to be repeating the interviewer question, so the interviewer should force a narrow answer format and escalate pressure after repeated echo turns.",
-        confidence: 0.9,
-        echoRecoveryMode: "narrow_format",
+          "Conversation-health is in guided mode, so the interviewer should constrain response shape while demanding novel content.",
+        confidence: 0.88,
+        echoRecoveryMode: "constrained_prompt",
         echoRecoveryAttempt: echoRecoveryAttempt + 1,
-        targetCodeLine: "one concrete algorithm choice and one explicit complexity statement",
-        specificIssue: "Candidate response echoed interviewer wording instead of providing a direct answer.",
-        expectedAnswer:
-          "Two sentences only: one concise algorithm explanation and one explicit time/space complexity line.",
+        targetCodeLine: "one key step on a tiny example and exact complexity statement",
+        specificIssue: "Candidate responses are not adding enough new information.",
+        expectedAnswer: "Three lines with algorithm, one concrete step, and exact complexity.",
         suggestedStage: currentStage,
         policyAction: policy.recommendedAction,
       });
@@ -340,16 +396,16 @@ export function makeCandidateDecision(input: {
       action: "ask_for_clarification",
       target: "reasoning",
       question:
-        "You repeated my question. Give a concrete answer in this format: (1) pseudocode in 2-3 steps, (2) one edge-case test with expected output, (3) time and space complexity.",
+        "Answer directly in two sentences and avoid reusing my wording: sentence 1 gives your algorithm and why it works, sentence 2 gives time and space complexity.",
       reason:
-        "The latest candidate turn looks like an echo/non-answer, so the interviewer should restate the answer contract and force a concrete response shape.",
+        "Conversation-health is constrained due early echo/no-progress signals, so the interviewer should force a narrow direct format.",
       confidence: 0.86,
-      echoRecoveryMode: "constrained_prompt",
+      echoRecoveryMode: "narrow_format",
       echoRecoveryAttempt: echoRecoveryAttempt + 1,
-      targetCodeLine: "the next concrete pseudocode steps and one edge-case expected output",
-      specificIssue: "Candidate response echoed interviewer prompt without adding evaluable evidence.",
+      targetCodeLine: "one concrete algorithm choice and one explicit complexity statement",
+      specificIssue: "Early echo/no-progress pattern detected.",
       expectedAnswer:
-        "A constrained three-part answer: pseudocode steps, one boundary test with expected output, and explicit complexity.",
+        "Two short sentences with a concrete algorithm explanation and explicit time/space complexity.",
       suggestedStage: currentStage,
       policyAction: policy.recommendedAction,
     });
