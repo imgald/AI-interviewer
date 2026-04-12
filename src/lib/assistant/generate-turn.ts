@@ -10,6 +10,7 @@ import {
   type InterviewPolicyAction,
   type CodingInterviewHintLevel,
   type CodingInterviewHintStyle,
+  type SystemDesignPolicyAction,
 } from "@/lib/assistant/policy";
 import { buildFallbackReplyFromDecision, describeReplyStrategy } from "@/lib/assistant/reply_strategy";
 import { extractCandidateSignalsSmart, type CandidateSignalSnapshot } from "@/lib/assistant/signal_extractor";
@@ -159,11 +160,12 @@ async function generateSystemDesignAssistantTurn(
   const signals = await extractCandidateSignalsSmart({
     currentStage: "PROBLEM_UNDERSTANDING",
     mode: "SYSTEM_DESIGN",
+    systemDesignStage: currentStage,
     recentTranscripts: input.recentTranscripts,
     recentEvents: input.recentEvents,
     latestExecutionRun: input.latestExecutionRun,
   });
-  const decision = buildSystemDesignDecision(signals, currentStage);
+  const decision = buildSystemDesignDecision(signals, currentStage, input.targetLevel, input.recentEvents);
   const reply = buildSystemDesignFallbackReply(decision, findLatestTurn(input.recentTranscripts, "AI") ?? undefined);
   const suggestedStage = inferSuggestedSystemDesignStage({
     currentStage: currentStage,
@@ -267,11 +269,12 @@ async function* streamSystemDesignAssistantTurn(
   const signals = await extractCandidateSignalsSmart({
     currentStage: "PROBLEM_UNDERSTANDING",
     mode: "SYSTEM_DESIGN",
+    systemDesignStage: currentStage,
     recentTranscripts: input.recentTranscripts,
     recentEvents: input.recentEvents,
     latestExecutionRun: input.latestExecutionRun,
   });
-  const decision = buildSystemDesignDecision(signals, currentStage);
+  const decision = buildSystemDesignDecision(signals, currentStage, input.targetLevel, input.recentEvents);
   const reply = buildSystemDesignFallbackReply(decision, findLatestTurn(input.recentTranscripts, "AI") ?? undefined);
   const suggestedStage = inferSuggestedSystemDesignStage({
     currentStage: currentStage,
@@ -1926,10 +1929,15 @@ function normalizeSystemDesignStage(stage: string | null | undefined): SystemDes
 function buildSystemDesignDecision(
   signals: CandidateSignalSnapshot,
   currentStage: SystemDesignStage,
+  targetLevel?: string | null,
+  recentEvents?: GenerateAssistantTurnInput["recentEvents"],
 ): SystemDesignDecision {
+  const previousActionType = findPreviousSystemDesignActionType(recentEvents);
   const baseDecision = makeSystemDesignDecision({
     currentStage,
     signals,
+    targetLevel,
+    previousActionType,
   });
   const guarded = enforceSystemDesignNoCodeInvariant({
     mode: "SYSTEM_DESIGN",
@@ -1948,6 +1956,35 @@ function buildSystemDesignDecision(
     target: guarded.target as CandidateDecision["target"],
     question: guarded.question,
   };
+}
+
+function findPreviousSystemDesignActionType(
+  events: GenerateAssistantTurnInput["recentEvents"] | undefined,
+): SystemDesignPolicyAction | null {
+  for (let index = (events?.length ?? 0) - 1; index >= 0; index -= 1) {
+    const event = events?.[index];
+    if (!event || event.eventType !== "DECISION_RECORDED") {
+      continue;
+    }
+    const payload = asRecord(event.payloadJson);
+    const decision = asRecord(payload.decision);
+    const action = decision.systemDesignActionType;
+    if (
+      action === "ASK_REQUIREMENT" ||
+      action === "ASK_CAPACITY" ||
+      action === "PROBE_TRADEOFF" ||
+      action === "CHALLENGE_SPOF" ||
+      action === "ZOOM_IN" ||
+      action === "WRAP_UP"
+    ) {
+      return action;
+    }
+  }
+  return null;
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 }
 
 function buildSystemDesignFallbackReply(decision: CandidateDecision, previousAiTurn?: string) {

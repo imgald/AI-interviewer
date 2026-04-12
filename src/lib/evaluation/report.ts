@@ -323,6 +323,7 @@ type RewardSummary = {
     riskIdentified: number;
     tradeoffDepth: number;
     handwavePenalty: number;
+    pivotImpact: number;
   };
   designEvidenceTypeCounts: Array<{ type: string; count: number }>;
   attributions: Array<{
@@ -337,6 +338,7 @@ type RewardSummary = {
       riskIdentified: number;
       tradeoffDepth: number;
       handwavePenalty: number;
+      pivotImpact: number;
     };
   }>;
   topPenalties: Array<{ penalty: string; count: number }>;
@@ -350,6 +352,7 @@ type SystemDesignDna = {
   reliability_awareness: number;
   bottleneck_sensitivity: number;
   levelRecommendation: "Mid-level" | "Senior" | "Staff";
+  calibrationNotes?: string[];
   strengths: string[];
   weaknesses: string[];
   evidencePins: Array<{
@@ -1242,6 +1245,7 @@ function buildRewardSummary(events: SessionEventLike[]): RewardSummary | null {
     riskIdentified: number;
     tradeoffDepth: number;
     handwavePenalty: number;
+    pivotImpact: number;
   }>(
     (acc, reward) => {
       const components = asRecord(reward.components);
@@ -1253,6 +1257,7 @@ function buildRewardSummary(events: SessionEventLike[]): RewardSummary | null {
       acc.riskIdentified += numberValue(components.riskIdentified);
       acc.tradeoffDepth += numberValue(components.tradeoffDepth);
       acc.handwavePenalty += numberValue(components.handwavePenalty);
+      acc.pivotImpact += numberValue(components.pivotImpact);
       return acc;
     },
     {
@@ -1264,6 +1269,7 @@ function buildRewardSummary(events: SessionEventLike[]): RewardSummary | null {
       riskIdentified: 0,
       tradeoffDepth: 0,
       handwavePenalty: 0,
+      pivotImpact: 0,
     },
   );
 
@@ -1297,6 +1303,7 @@ function buildRewardSummary(events: SessionEventLike[]): RewardSummary | null {
           riskIdentified: Number(numberValue(breakdown.riskIdentified).toFixed(2)),
           tradeoffDepth: Number(numberValue(breakdown.tradeoffDepth).toFixed(2)),
           handwavePenalty: Number(numberValue(breakdown.handwavePenalty).toFixed(2)),
+          pivotImpact: Number(numberValue(breakdown.pivotImpact).toFixed(2)),
         },
       };
     });
@@ -1330,6 +1337,7 @@ function buildRewardSummary(events: SessionEventLike[]): RewardSummary | null {
       riskIdentified: Number((componentTotals.riskIdentified / count).toFixed(2)),
       tradeoffDepth: Number((componentTotals.tradeoffDepth / count).toFixed(2)),
       handwavePenalty: Number((componentTotals.handwavePenalty / count).toFixed(2)),
+      pivotImpact: Number((componentTotals.pivotImpact / count).toFixed(2)),
     },
     designEvidenceTypeCounts: [...designEvidenceTypeCounts.entries()]
       .sort((left, right) => right[1] - left[1])
@@ -2136,8 +2144,14 @@ function buildSystemDesignDna(input: {
   const bottleneckScore = scoreByMissing(signalValues.bottleneck_unexamined);
   const avgScore = (requirementScore + capacityScore + tradeoffScore + reliabilityScore + bottleneckScore) / 5;
 
-  const levelRecommendation: SystemDesignDna["levelRecommendation"] =
+  const baseLevelRecommendation: SystemDesignDna["levelRecommendation"] =
     avgScore >= 4.2 ? "Staff" : avgScore >= 3.4 ? "Senior" : "Mid-level";
+  const levelCapResult = applySystemDesignLevelCap({
+    baseLevel: baseLevelRecommendation,
+    tradeoffScore,
+    capacityScore,
+  });
+  const levelRecommendation = levelCapResult.level;
 
   const strengths: string[] = [];
   const weaknesses: string[] = [];
@@ -2178,6 +2192,7 @@ function buildSystemDesignDna(input: {
     reliability_awareness: Number(reliabilityScore.toFixed(2)),
     bottleneck_sensitivity: Number(bottleneckScore.toFixed(2)),
     levelRecommendation,
+    calibrationNotes: levelCapResult.notes,
     strengths: strengths.slice(0, 3),
     weaknesses: weaknesses.slice(0, 3),
     evidencePins: [
@@ -2217,6 +2232,38 @@ function buildSystemDesignDna(input: {
         evidenceRefs: asStringArray(refs.bottleneck_unexamined),
       },
     ],
+  };
+}
+
+function applySystemDesignLevelCap(input: {
+  baseLevel: SystemDesignDna["levelRecommendation"];
+  tradeoffScore: number;
+  capacityScore: number;
+}) {
+  const notes: string[] = [];
+  let level = input.baseLevel;
+  const tradeoffWeak = input.tradeoffScore < 4;
+  const capacityWeak = input.capacityScore < 4;
+
+  if (tradeoffWeak) {
+    notes.push("Calibration guard: tradeoff depth is below strong-level threshold.");
+  }
+  if (capacityWeak) {
+    notes.push("Calibration guard: capacity instinct is below strong-level threshold.");
+  }
+
+  if (input.baseLevel === "Staff" && tradeoffWeak) {
+    level = "Senior";
+    notes.push("Staff-level cap applied: tradeoff depth signal is below the required threshold.");
+  }
+  if (level === "Staff" && capacityWeak) {
+    level = "Senior";
+    notes.push("Staff-level cap applied: capacity instinct signal is below the required threshold.");
+  }
+
+  return {
+    level,
+    notes,
   };
 }
 

@@ -34,7 +34,7 @@ export default async function QuestionsPage(_props: QuestionsPageProps) {
       title: question.title,
       type: question.type,
       difficulty: question.difficulty,
-      levelTarget: question.levelTarget ?? "SDE2",
+      levelTarget: question.type === "SYSTEM_DESIGN" ? "N/A" : (question.levelTarget ?? "SDE2"),
       companyStyle: question.companyStyle ?? "GENERIC",
       estimatedMinutes: question.estimatedMinutes ?? null,
       topicTags: toStringArray(question.topicTags),

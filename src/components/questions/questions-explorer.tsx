@@ -9,7 +9,7 @@ export type QuestionExplorerItem = {
   title: string;
   type: "CODING" | "SYSTEM_DESIGN";
   difficulty: "EASY" | "MEDIUM" | "HARD";
-  levelTarget: "NEW_GRAD" | "SDE1" | "SDE2" | "SENIOR" | "STAFF";
+  levelTarget: "NEW_GRAD" | "SDE1" | "SDE2" | "SENIOR" | "STAFF" | "N/A";
   companyStyle: "GENERIC" | "AMAZON" | "META" | "GOOGLE" | "STRIPE";
   estimatedMinutes: number | null;
   topicTags: string[];
@@ -317,7 +317,7 @@ export function QuestionsExplorer({ questions }: { questions: QuestionExplorerIt
                   <QuestionLaunchButton
                     questionId={question.id}
                     mode={question.type}
-                    targetLevel={question.levelTarget}
+                    targetLevel={question.levelTarget === "N/A" ? undefined : question.levelTarget}
                     companyStyle={question.companyStyle}
                     variant="link"
                     label={question.order ? `${question.order}. ${question.title}` : question.title}

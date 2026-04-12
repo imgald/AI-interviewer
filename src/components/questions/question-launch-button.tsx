@@ -6,7 +6,7 @@ import { useState, useTransition } from "react";
 type QuestionLaunchButtonProps = {
   questionId: string;
   mode: "CODING" | "SYSTEM_DESIGN";
-  targetLevel: "NEW_GRAD" | "SDE1" | "SDE2" | "SENIOR" | "STAFF";
+  targetLevel?: "NEW_GRAD" | "SDE1" | "SDE2" | "SENIOR" | "STAFF";
   companyStyle: "GENERIC" | "AMAZON" | "META" | "GOOGLE" | "STRIPE";
   variant?: "button" | "link";
   label?: string;
@@ -26,6 +26,7 @@ export function QuestionLaunchButton({
 
   async function handleLaunch() {
     setError(null);
+    const resolvedTargetLevel = targetLevel ?? "SDE2";
 
     const response = await fetch("/api/sessions", {
       method: "POST",
@@ -33,7 +34,7 @@ export function QuestionLaunchButton({
       body: JSON.stringify({
         questionId,
         mode,
-        targetLevel,
+        targetLevel: resolvedTargetLevel,
         selectedLanguage: "PYTHON",
         companyStyle,
         voiceEnabled: true,

@@ -1333,6 +1333,12 @@ Execution goals:
 - every phase has explicit DoD
 - prioritize shippable decision-system behavior over conceptual discussion
 
+Current execution status (updated April 12, 2026):
+- `Phase 2` baseline completed (stage-aware handwave depth detection + decision/reward integration).
+- `Phase 3` baseline completed (inertia + hysteresis decision stabilizer in system-design policy path).
+- `Phase 4` baseline completed (strict pivot detection integrated into reward attribution).
+- `Phase 5` baseline completed (calibration pack scaffold + non-linear system-design level cap + tests).
+
 Phase sequence:
 
 1. Phase 0 (`P0`) - Mode + stage baseline

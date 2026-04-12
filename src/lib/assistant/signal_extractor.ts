@@ -1,4 +1,5 @@
-﻿import type { CodingInterviewStage } from "@/lib/assistant/stages";
+import { assessSystemDesignDepth, type HandwaveCategory } from "@/lib/assistant/depth";
+import type { CodingInterviewStage, SystemDesignStage } from "@/lib/assistant/stages";
 
 type TranscriptLike = {
   speaker: "USER" | "AI" | "SYSTEM";
@@ -49,6 +50,13 @@ export type DesignSignalSnapshot = {
   signals: DesignSignals;
   evidenceRefs: Record<DesignSignalKey, string[]>;
   summary: string;
+  handwave?: {
+    detected: boolean;
+    depth: number;
+    expectedDepth: number;
+    categories: HandwaveCategory[];
+    evidenceRefs: string[];
+  };
 };
 
 export type CandidateSignalSnapshot = {
@@ -79,6 +87,7 @@ export type CandidateSignalSnapshot = {
 export function extractCandidateSignals(input: {
   currentStage: CodingInterviewStage;
   mode?: "CODING" | "SYSTEM_DESIGN";
+  systemDesignStage?: SystemDesignStage;
   recentTranscripts: TranscriptLike[];
   recentEvents?: SessionEventLike[];
   latestExecutionRun?: ExecutionRunLike | null;
@@ -160,7 +169,7 @@ export function extractCandidateSignals(input: {
 
   const designSignals =
     input.mode === "SYSTEM_DESIGN"
-      ? extractSystemDesignSignals(input.recentTranscripts)
+      ? extractSystemDesignSignals(input.recentTranscripts, input.systemDesignStage)
       : undefined;
 
   return {
@@ -204,6 +213,7 @@ export function extractCandidateSignals(input: {
 export async function extractCandidateSignalsSmart(input: {
   currentStage: CodingInterviewStage;
   mode?: "CODING" | "SYSTEM_DESIGN";
+  systemDesignStage?: SystemDesignStage;
   recentTranscripts: TranscriptLike[];
   recentEvents?: SessionEventLike[];
   latestExecutionRun?: ExecutionRunLike | null;
@@ -963,7 +973,10 @@ function parseObservedSignals(
   }
 }
 
-function extractSystemDesignSignals(recentTranscripts: TranscriptLike[]): DesignSignalSnapshot {
+function extractSystemDesignSignals(
+  recentTranscripts: TranscriptLike[],
+  stage: SystemDesignStage | undefined,
+): DesignSignalSnapshot {
   const userTurns = recentTranscripts
     .map((segment, index) => ({ segment, index }))
     .filter((item) => item.segment.speaker === "USER");
@@ -1055,10 +1068,26 @@ function extractSystemDesignSignals(recentTranscripts: TranscriptLike[]): Design
     signals.bottleneck_unexamined ? "bottleneck analysis missing" : "bottleneck analyzed",
   ].join("; ");
 
+  const depthAssessment = assessSystemDesignDepth({
+    stage: stage ?? "REQUIREMENTS",
+    recentUserText: normalizedText,
+    tradeoffMissed: signals.tradeoff_missed,
+  });
+  const handwaveSummary = depthAssessment.handwave
+    ? `handwave detected (${depthAssessment.categories.join(", ") || "generic_shallow_answer"})`
+    : "depth acceptable for stage";
+
   return {
     signals,
     evidenceRefs,
-    summary,
+    summary: `${summary}; ${handwaveSummary}`,
+    handwave: {
+      detected: depthAssessment.handwave,
+      depth: depthAssessment.depth,
+      expectedDepth: depthAssessment.expectedDepth,
+      categories: depthAssessment.categories,
+      evidenceRefs: depthAssessment.evidenceRefs,
+    },
   };
 }
 
@@ -1408,5 +1437,6 @@ function normalizeStructuredEvidenceItem(value: unknown): CandidateEvidenceItem 
     fix,
   };
 }
+
 
 

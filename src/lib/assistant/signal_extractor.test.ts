@@ -336,6 +336,43 @@ describe("extractCandidateSignals", () => {
     expect(snapshot.designSignals?.signals.bottleneck_unexamined).toBe(false);
     expect(snapshot.designSignals?.evidenceRefs.requirement_missing.length ?? 0).toBeGreaterThan(0);
   });
+
+  it("flags handwave in deep dive when scaling claims are unquantified and component choices are not justified", () => {
+    const snapshot = extractCandidateSignals({
+      mode: "SYSTEM_DESIGN",
+      systemDesignStage: "DEEP_DIVE",
+      currentStage: "APPROACH_DISCUSSION",
+      recentTranscripts: [
+        {
+          speaker: "USER",
+          text: "We should use cache, queue, and sharding to handle massive scale globally.",
+        },
+      ],
+      latestExecutionRun: null,
+    });
+
+    expect(snapshot.designSignals?.handwave?.detected).toBe(true);
+    expect(snapshot.designSignals?.handwave?.categories).toContain("unquantified_scaling_claim");
+    expect(snapshot.designSignals?.handwave?.categories).toContain("unjustified_component_choice");
+  });
+
+  it("does not over-penalize high-level stage when constraints and causal chain are present", () => {
+    const snapshot = extractCandidateSignals({
+      mode: "SYSTEM_DESIGN",
+      systemDesignStage: "HIGH_LEVEL",
+      currentStage: "APPROACH_DISCUSSION",
+      recentTranscripts: [
+        {
+          speaker: "USER",
+          text:
+            "Latency and availability are the top constraints, and because read traffic dominates we place a cache in front of timeline reads to reduce DB pressure.",
+        },
+      ],
+      latestExecutionRun: null,
+    });
+
+    expect(snapshot.designSignals?.handwave?.detected).toBe(false);
+  });
 });
 
 

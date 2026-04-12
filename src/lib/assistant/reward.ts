@@ -1,3 +1,5 @@
+import { detectPivotMoment } from "@/lib/assistant/pivot";
+
 type SessionEventLike = {
   eventType: string;
   payloadJson?: unknown;
@@ -25,6 +27,7 @@ export type RewardResult = {
     riskIdentified: number;
     tradeoffDepth: number;
     handwavePenalty: number;
+    pivotImpact: number;
   };
   evidenceGainByAxis: Record<RewardAxis, number>;
   designEvidenceTypes: Array<"requirement" | "capacity" | "tradeoff" | "spof" | "bottleneck" | "handwave">;
@@ -39,6 +42,7 @@ export type RewardResult = {
       riskIdentified: number;
       tradeoffDepth: number;
       handwavePenalty: number;
+      pivotImpact: number;
     };
   };
   penalties: string[];
@@ -131,6 +135,7 @@ export function evaluateTurnReward(input: RewardInput): RewardResult {
   let riskIdentified = 0;
   let tradeoffDepth = 0;
   let handwavePenalty = 0;
+  let pivotImpact = 0;
   const designEvidenceTypes = new Set<"requirement" | "capacity" | "tradeoff" | "spof" | "bottleneck" | "handwave">();
 
   if (isSystemDesignReward) {
@@ -179,6 +184,7 @@ export function evaluateTurnReward(input: RewardInput): RewardResult {
     }
 
     const looksHandwavey =
+      latestDesignSignals?.handwave_detected === true ||
       action === "encourage_and_continue" ||
       (action === "hold_and_listen" && urgency === "high") ||
       (target === "approach" && !hasAny(action ?? "", ["probe", "ask_for_clarification"]));
@@ -191,6 +197,14 @@ export function evaluateTurnReward(input: RewardInput): RewardResult {
         handwavePenalty = -0.4;
       }
     }
+
+    const pivot = detectPivotMoment({
+      recentEvents: input.recentEvents,
+      decision: input.decision,
+    });
+    if (pivot.detected) {
+      pivotImpact = pivot.impactScore;
+    }
   }
 
   const total = clamp(
@@ -202,7 +216,8 @@ export function evaluateTurnReward(input: RewardInput): RewardResult {
         cleanClosure * 0.1 +
         riskIdentified * 0.08 +
         tradeoffDepth * 0.08 +
-        handwavePenalty * 0.08,
+        handwavePenalty * 0.08 +
+        pivotImpact * 0.08,
     ),
     -1,
     1,
@@ -220,6 +235,7 @@ export function evaluateTurnReward(input: RewardInput): RewardResult {
       riskIdentified: round2(riskIdentified),
       tradeoffDepth: round2(tradeoffDepth),
       handwavePenalty: round2(handwavePenalty),
+      pivotImpact: round2(pivotImpact),
     },
     evidenceGainByAxis,
     designEvidenceTypes: [...designEvidenceTypes],
@@ -234,6 +250,7 @@ export function evaluateTurnReward(input: RewardInput): RewardResult {
         riskIdentified: round2(riskIdentified),
         tradeoffDepth: round2(tradeoffDepth),
         handwavePenalty: round2(handwavePenalty),
+        pivotImpact: round2(pivotImpact),
       },
     },
     penalties,
@@ -276,6 +293,7 @@ function findLatestDesignSignals(
   tradeoff_missed: boolean;
   spof_missed: boolean;
   bottleneck_unexamined: boolean;
+  handwave_detected?: boolean;
 } | null {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i];
@@ -296,12 +314,14 @@ function findLatestDesignSignals(
     ] as const;
 
     if (keys.every((key) => typeof designSignalValues[key] === "boolean")) {
+      const handwave = asRecord(designSignals.handwave);
       return {
         requirement_missing: designSignalValues.requirement_missing as boolean,
         capacity_missing: designSignalValues.capacity_missing as boolean,
         tradeoff_missed: designSignalValues.tradeoff_missed as boolean,
         spof_missed: designSignalValues.spof_missed as boolean,
         bottleneck_unexamined: designSignalValues.bottleneck_unexamined as boolean,
+        handwave_detected: typeof handwave.detected === "boolean" ? (handwave.detected as boolean) : undefined,
       };
     }
   }

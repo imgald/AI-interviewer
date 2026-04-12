@@ -176,6 +176,7 @@ type ReportJson = {
       badInterruption?: number;
       flowPreservation?: number;
       cleanClosure?: number;
+      pivotImpact?: number;
     };
     topPenalties?: Array<{ penalty?: string; count?: number }>;
     trend?: Array<{ index?: number; total?: number; stage?: string | null }>;

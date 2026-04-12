@@ -149,4 +149,98 @@ describe("evaluateTurnReward", () => {
     expect(genericFollowup.components.handwavePenalty).toBeLessThan(0);
     expect(genericFollowup.penalties).toContain("handwave_detected");
   });
+
+  it("applies handwave penalty when design snapshot explicitly marks stage-depth handwave", () => {
+    const reward = evaluateTurnReward({
+      stage: "DEEP_DIVE",
+      decision: {
+        action: "ask_followup",
+        target: "approach",
+        systemDesignActionType: "ZOOM_IN",
+        urgency: "high",
+      },
+      recentEvents: [
+        {
+          eventType: "SIGNAL_SNAPSHOT_RECORDED",
+          payloadJson: {
+            signals: {
+              designSignals: {
+                signals: {
+                  requirement_missing: false,
+                  capacity_missing: false,
+                  tradeoff_missed: true,
+                  spof_missed: false,
+                  bottleneck_unexamined: true,
+                },
+                handwave: {
+                  detected: true,
+                  depth: 0.3,
+                  expectedDepth: 0.9,
+                  categories: ["tradeoff_evasion"],
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    expect(reward.components.handwavePenalty).toBeLessThan(0);
+    expect(reward.penalties).toContain("handwave_detected");
+  });
+
+  it("adds pivot impact when hint-led design progress unlocks a new dimension", () => {
+    const reward = evaluateTurnReward({
+      stage: "DEEP_DIVE",
+      decision: {
+        action: "probe_tradeoff",
+        target: "tradeoff",
+        systemDesignActionType: "PROBE_TRADEOFF",
+      },
+      recentEvents: [
+        {
+          eventType: "HINT_SERVED",
+          payloadJson: { hintLevel: "L1_AREA" },
+        },
+        {
+          eventType: "DECISION_RECORDED",
+          payloadJson: { decision: { target: "requirement", systemDesignActionType: "ASK_REQUIREMENT" } },
+        },
+        {
+          eventType: "SIGNAL_SNAPSHOT_RECORDED",
+          payloadJson: {
+            signals: {
+              designSignals: {
+                signals: {
+                  requirement_missing: true,
+                  capacity_missing: true,
+                  tradeoff_missed: true,
+                  spof_missed: true,
+                  bottleneck_unexamined: true,
+                },
+              },
+            },
+          },
+        },
+        {
+          eventType: "SIGNAL_SNAPSHOT_RECORDED",
+          payloadJson: {
+            signals: {
+              designSignals: {
+                signals: {
+                  requirement_missing: false,
+                  capacity_missing: true,
+                  tradeoff_missed: true,
+                  spof_missed: true,
+                  bottleneck_unexamined: true,
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    expect(reward.components.pivotImpact).toBeGreaterThan(0);
+  });
 });

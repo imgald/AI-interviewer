@@ -678,5 +678,85 @@ it("emits system design DNA with evidence pinning when mode is SYSTEM_DESIGN", (
   ).toBe(true);
 });
 
+it("applies non-linear cap to system design level recommendation when tradeoff depth is missing", () => {
+  const report = generateSessionReport({
+    sessionId: "session-sd-cap-1",
+    mode: "SYSTEM_DESIGN",
+    questionTitle: "Design Notifications",
+    transcripts: [
+      { speaker: "USER", text: "Requirements and reliability are clear." },
+    ],
+    events: [
+      {
+        eventType: "SIGNAL_SNAPSHOT_RECORDED",
+        payloadJson: {
+          stage: "DEEP_DIVE",
+          signals: {
+            designSignals: {
+              signals: {
+                requirement_missing: false,
+                capacity_missing: false,
+                tradeoff_missed: true,
+                spof_missed: false,
+                bottleneck_unexamined: false,
+              },
+              evidenceRefs: {
+                requirement_missing: ["USER#1: requirements"],
+                capacity_missing: ["USER#1: 20k qps reads"],
+                tradeoff_missed: ["No direct candidate evidence in recent turns."],
+                spof_missed: ["USER#1: multi-az failover"],
+                bottleneck_unexamined: ["USER#1: queue bottleneck mitigation"],
+              },
+            },
+          },
+        },
+      },
+      {
+        eventType: "REWARD_RECORDED",
+        payloadJson: {
+          reward: {
+            total: 0.4,
+            designEvidenceTypes: ["requirement", "capacity", "spof", "bottleneck"],
+          },
+          trace: { transcriptSegmentId: "seg-sd-cap-1" },
+        },
+      },
+    ],
+    executionRuns: [],
+    candidateStateSnapshots: [
+      {
+        id: "snap-sd-cap-1",
+        stage: "DEEP_DIVE",
+        snapshotJson: {
+          designSignals: {
+            signals: {
+              requirement_missing: false,
+              capacity_missing: false,
+              tradeoff_missed: true,
+              spof_missed: false,
+              bottleneck_unexamined: false,
+            },
+            evidenceRefs: {
+              requirement_missing: ["USER#1: requirements"],
+              capacity_missing: ["USER#1: 20k qps reads"],
+              tradeoff_missed: ["No direct candidate evidence in recent turns."],
+              spof_missed: ["USER#1: multi-az failover"],
+              bottleneck_unexamined: ["USER#1: queue bottleneck mitigation"],
+            },
+          },
+        },
+      },
+    ],
+  });
+
+  const reportJson = report.reportJson as Record<string, unknown>;
+  const systemDesignDna = (reportJson.systemDesignDna as Record<string, unknown>) ?? {};
+  const levelRecommendation = systemDesignDna.levelRecommendation as string;
+  const calibrationNotes = (systemDesignDna.calibrationNotes as string[]) ?? [];
+
+  expect(levelRecommendation).not.toBe("Staff");
+  expect(calibrationNotes.some((note) => /cap applied|tradeoff depth/i.test(note))).toBe(true);
+});
+
 
 
