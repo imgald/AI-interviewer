@@ -1418,7 +1418,8 @@ Phase sequence:
   - reward/report calibration modules
   - offline evaluation fixtures
 - implementation target:
-  - labeled session set with level/hire/pivot references
+  - build a system-design calibration pack with `50-100` labeled transcripts
+  - transcript labels include level/hire/pivot + signal/reward/DNA sanity tags
   - non-linear level caps (for missing critical dimensions)
   - tune gains/penalties (`G_evidence`, `P_handwave`, `G_pivot`)
 - DoD:
@@ -1450,6 +1451,33 @@ Phase sequence:
 - DoD:
   - no-capacity deep-dive is reliably intercepted
   - flow stays adaptive, not brittle
+
+9. Phase 8 (`P1`) - System-design report view
+- files:
+  - `src/app/report/[id]/page.tsx`
+  - `src/lib/evaluation/report.ts`
+- implementation target:
+  - add a System Design focused report section with:
+    - five-dimension radar (`requirement clarity`, `capacity instinct`, `tradeoff depth`, `reliability awareness`, `bottleneck sensitivity`)
+    - evidence pins table (`dimension -> snapshotId -> turnIds/evidence refs`)
+- DoD:
+  - report surfaces system-design strengths/gaps in one dedicated view
+  - every plotted dimension is evidence-backed and drillable
+
+10. Phase 9 (`P1`) - Whiteboard weak-signal observability
+- files:
+  - whiteboard event ingest + admin/report observability panels
+- implementation target:
+  - expose whiteboard weak signals as analysis-only metrics:
+    - `component_count`
+    - `connection_count`
+    - stage-local drawing activity trend
+  - compute correlation with interview quality metrics offline
+  - keep strict boundary: no decision/reward input from these signals in this phase
+- DoD:
+  - observability panel can inspect weak-signal trends per session
+  - correlation report is generated and reviewable
+  - weak signals remain excluded from core decision path
 
 Fast vs Slow path (must keep):
 - Fast path (sync, current turn):
