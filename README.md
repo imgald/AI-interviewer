@@ -283,8 +283,6 @@ npm run build
 - Live provider drafts are periodic previews rather than true token-level streaming ASR
 - Code execution still defaults to a local process unless Docker sandboxing is enabled, but now supports Python, JavaScript, and C++
 - Authentication is still stubbed around a demo user
-- Evaluation/report is still lightweight compared with a full rubric system, but it now includes evidence-backed state, replay, timing metadata, and hint-cost accounting
-- Snapshot-first state is in place for `/admin` and `/report`, but the replay view still mixes canonical snapshots with event evidence rather than a full transcript-native playback model
 - Prisma generation on Windows can fail if `dev` or `worker` processes are locking the Prisma engine file.
 - After applying the 20260328020000_session_state_snapshots migration to the local Docker Postgres, session snapshot persistence now requires the app process to be restarted once if it had previously auto-disabled snapshot writes due to missing tables.
 
@@ -319,9 +317,81 @@ This README is intentionally condensed for fast context loading.
 - Current system-design execution status and phase notes:
   - [System Design Execution Plan](docs/roadmaps/roadmap-archive-2026-04-12.md#system-design-interviewer-execution-roadmap-v2-final-executable)
 
-### Next Focus
+### Final Polish Roadmap (v2.1)
 
-1. Build transcript-based calibration evaluation packs (real-session stratified samples by level).
-2. Add report-side drill-down linking each system-design evidence pin to exact transcript turn cards.
-3. Run weekly policy-regression snapshots and track drift trends.
+Goal:
+- move from "behavior looks right" to "decision quality is measurable and auditable"
+
+Priority track (`P0 + P2`, parallel, highest):
+- Calibration x Regression hardening
+  - build transcript-based calibration evaluation packs (real-session stratified samples by level)
+  - add `NoiseTag`:
+    - `STT_CORRUPTION`
+    - `PARTIAL_TRANSCRIPT`
+    - `INTERRUPTED_TURN`
+  - invariants:
+    - noise-tagged turns do not contribute to handwave penalty
+    - noise-tagged turns do not trigger pivot accounting
+    - noise-tagged turns do not contaminate reward attribution
+  - strengthen pivot metrics:
+    - `trigger_action`
+    - `delta_time` (turns/seconds)
+    - `dimension_jump`
+    - `impact_score` (0-1)
+  - expose `Nudge Conversion Rate`:
+    - `conversion_rate = pivot_count / guide_count`
+  - regression targets:
+    - `late_bloomer` can recover
+    - `bullshitter` gets suppressed
+    - `rigid` behavior is capped correctly
+  - operating cadence:
+    - run weekly policy-regression snapshots and track drift trends
+
+Priority track (`P1`):
+- Handwave v2 + Gap Routing
+  - `Depth Score` dimensions:
+    - `numeric_density` (QPS/GB/ms)
+    - `constraint_binding` (ties to requirement)
+    - `causal_chain` (`because -> therefore`)
+    - `specificity` (concrete components/terms)
+  - semantic decay:
+    - increase handwave score when language is vague (`maybe/probably/usually`) without numbers
+  - gap-aware action routing:
+    - capacity gap -> `ask_back_of_envelope`
+    - reliability gap -> `challenge_spof`
+    - component gap -> `probe_tradeoff`
+    - bottleneck gap -> `challenge_bottleneck`
+  - depth expectation counter:
+    - if `low_detail_streak >= 2`, force deeper probing action
+
+Decision stability (`P3`, maintain):
+- keep inertia + hysteresis + safety override
+- constraints:
+  - inertia only applies inside same problem chain
+  - hysteresis uses explicit delta threshold
+  - hard invariant or budget override always wins
+
+System-design causal loop (`P4`, maintain):
+- hard gate:
+  - block deep-dive when capacity prerequisite is missing
+- soft consistency penalty:
+  - penalize reliability/quality when architecture contradicts stated capacity
+
+Transcript-native drill-down (`P1.5`):
+- add pointer model:
+  - `TextPointer { turnId, start, length }`
+- use in report/admin/calibration:
+  - report-side drill-down links each system-design evidence pin to exact transcript turn spans
+  - click evidence -> highlight exact source span
+
+Three open closure gaps to resolve next:
+1. unify `GapState` as a first-class layer before decision routing
+2. enforce cross-stage reward consistency (not only per-stage scoring)
+3. bind pivot strength into level mapping (with cap guardrails)
+
+Next single commit to start:
+- `Handwave v2 + Gap Routing + Depth Score` (system-design path first)
+  - `src/lib/assistant/signal_extractor.ts`
+  - `src/lib/assistant/system_design_decision.ts`
+  - `src/lib/assistant/reward.ts`
 
