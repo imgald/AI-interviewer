@@ -26,7 +26,7 @@ This repo now has a working MVP-plus skeleton with:
 
 ## Recent Progress
 
-- System design interviewer `Phase 0/1/2/3` is completed, and `Phase 4` reward/report groundwork is now landed.
+- System design interviewer `Phase 0/1/2/3/4` is completed (including reward attribution and report wiring).
 - Stage control is mode-aware, and system design includes API contract gating + on-demand capacity gating.
 - Design signals (`requirements/capacity/tradeoff/SPOF/bottleneck`) are extracted with evidence refs and visible in admin snapshots.
 - System design decision path is now separated from coding decision flow to avoid regressions while still reusing shared conversation-quality controls.
@@ -1206,7 +1206,11 @@ Current implementation status (updated April 11, 2026):
   - six-stage state machine is active with `API_CONTRACT_CHECK` and on-demand `CAPACITY` gating.
 - `Phase 2` completed
   - five design signals + evidence refs are extracted and recorded into snapshots/events with `/admin` visibility.
-- next active build target: `Phase 3` (`Decision engine extension`).
+- `Phase 3` completed
+  - system-design-specific decision actions and score routing are separated from coding flow with no-code invariant protection.
+- `Phase 4` completed
+  - reward/report now include system-design depth vs handwave attribution by turn and evidence type.
+- next active build target: `Phase 5` (`Report and DNA extension`).
 
 Phase sequence:
 

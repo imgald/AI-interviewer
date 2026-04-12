@@ -99,4 +99,54 @@ describe("evaluateTurnReward", () => {
     expect(reward.attribution.originTurnId).toBe("seg-sd-1");
     expect(typeof reward.attribution.breakdown.tradeoffDepth).toBe("number");
   });
+
+  it("distinguishes deep system design follow-up from generic handwave follow-up", () => {
+    const recentEvents = [
+      {
+        eventType: "SIGNAL_SNAPSHOT_RECORDED",
+        payloadJson: {
+          signals: {
+            designSignals: {
+              signals: {
+                requirement_missing: false,
+                capacity_missing: false,
+                tradeoff_missed: true,
+                spof_missed: false,
+                bottleneck_unexamined: false,
+              },
+            },
+          },
+        },
+      },
+    ];
+
+    const deepFollowup = evaluateTurnReward({
+      stage: "DEEP_DIVE",
+      decision: {
+        action: "probe_tradeoff",
+        target: "tradeoff",
+        systemDesignActionType: "PROBE_TRADEOFF",
+        urgency: "high",
+      },
+      recentEvents,
+      originTurnId: "seg-sd-2",
+    });
+
+    const genericFollowup = evaluateTurnReward({
+      stage: "DEEP_DIVE",
+      decision: {
+        action: "encourage_and_continue",
+        target: "approach",
+        systemDesignActionType: "ZOOM_IN",
+        urgency: "high",
+      },
+      recentEvents,
+      originTurnId: "seg-sd-3",
+    });
+
+    expect(deepFollowup.total).toBeGreaterThan(genericFollowup.total);
+    expect(deepFollowup.components.tradeoffDepth).toBeGreaterThan(0);
+    expect(genericFollowup.components.handwavePenalty).toBeLessThan(0);
+    expect(genericFollowup.penalties).toContain("handwave_detected");
+  });
 });

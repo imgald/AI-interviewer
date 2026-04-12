@@ -56,6 +56,7 @@ export function evaluateTurnReward(input: RewardInput): RewardResult {
   const recentEchoCount = input.recentEvents.filter((event) => event.eventType === "CANDIDATE_ECHO_DETECTED").length;
   const echoRecoveryMode = normalize(stringValue(decision.echoRecoveryMode));
   const systemDesignActionType = normalize(stringValue(decision.systemDesignActionType));
+  const latestDesignSignals = findLatestDesignSignals(input.recentEvents);
 
   const evidenceGainByAxis = scoreEvidenceAxes(target);
   const evidenceGain = round2(
@@ -124,7 +125,8 @@ export function evaluateTurnReward(input: RewardInput): RewardResult {
 
   const isSystemDesignReward =
     Boolean(systemDesignActionType) ||
-    hasAny(target ?? "", ["requirement", "capacity", "spof", "bottleneck"]);
+    hasAny(target ?? "", ["requirement", "capacity", "spof", "bottleneck"]) ||
+    latestDesignSignals !== null;
 
   let riskIdentified = 0;
   let tradeoffDepth = 0;
@@ -132,6 +134,13 @@ export function evaluateTurnReward(input: RewardInput): RewardResult {
   const designEvidenceTypes = new Set<"requirement" | "capacity" | "tradeoff" | "spof" | "bottleneck" | "handwave">();
 
   if (isSystemDesignReward) {
+    const missingCount =
+      (latestDesignSignals?.requirement_missing ? 1 : 0) +
+      (latestDesignSignals?.capacity_missing ? 1 : 0) +
+      (latestDesignSignals?.tradeoff_missed ? 1 : 0) +
+      (latestDesignSignals?.spof_missed ? 1 : 0) +
+      (latestDesignSignals?.bottleneck_unexamined ? 1 : 0);
+
     if (hasAny(target ?? "", ["spof", "bottleneck", "correctness"]) || hasAny(action ?? "", ["challenge", "zoom"])) {
       riskIdentified = 0.35;
       if (hasAny(target ?? "", ["spof"])) {
@@ -153,6 +162,22 @@ export function evaluateTurnReward(input: RewardInput): RewardResult {
       designEvidenceTypes.add("capacity");
     }
 
+    const explicitlyAddressesMissingSignal =
+      (latestDesignSignals?.requirement_missing === true && hasAny(target ?? "", ["requirement"])) ||
+      (latestDesignSignals?.capacity_missing === true && hasAny(target ?? "", ["capacity"])) ||
+      (latestDesignSignals?.tradeoff_missed === true && hasAny(target ?? "", ["tradeoff"])) ||
+      (latestDesignSignals?.spof_missed === true && hasAny(target ?? "", ["spof"])) ||
+      (latestDesignSignals?.bottleneck_unexamined === true && hasAny(target ?? "", ["bottleneck"]));
+
+    if (explicitlyAddressesMissingSignal) {
+      riskIdentified = clamp(riskIdentified + 0.1, -1, 1);
+    }
+
+    if (missingCount <= 1 && hasAny(action ?? "", ["probe_tradeoff", "challenge_spof", "zoom_in"])) {
+      tradeoffDepth = clamp(tradeoffDepth + 0.08, -1, 1);
+      riskIdentified = clamp(riskIdentified + 0.08, -1, 1);
+    }
+
     const looksHandwavey =
       action === "encourage_and_continue" ||
       (action === "hold_and_listen" && urgency === "high") ||
@@ -161,6 +186,10 @@ export function evaluateTurnReward(input: RewardInput): RewardResult {
       handwavePenalty = -0.3;
       penalties.push("handwave_detected");
       designEvidenceTypes.add("handwave");
+
+      if (missingCount >= 3) {
+        handwavePenalty = -0.4;
+      }
     }
   }
 
@@ -237,6 +266,47 @@ function findLatestDecisionTarget(events: SessionEventLike[]): string | null {
 
 function hasAny(value: string, needles: string[]) {
   return needles.some((needle) => value.includes(needle));
+}
+
+function findLatestDesignSignals(
+  events: SessionEventLike[],
+): {
+  requirement_missing: boolean;
+  capacity_missing: boolean;
+  tradeoff_missed: boolean;
+  spof_missed: boolean;
+  bottleneck_unexamined: boolean;
+} | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i];
+    if (!event || event.eventType !== "SIGNAL_SNAPSHOT_RECORDED") {
+      continue;
+    }
+
+    const payload = asRecord(event.payloadJson);
+    const signals = asRecord(payload.signals);
+    const designSignals = asRecord(signals.designSignals);
+    const designSignalValues = asRecord(designSignals.signals);
+    const keys = [
+      "requirement_missing",
+      "capacity_missing",
+      "tradeoff_missed",
+      "spof_missed",
+      "bottleneck_unexamined",
+    ] as const;
+
+    if (keys.every((key) => typeof designSignalValues[key] === "boolean")) {
+      return {
+        requirement_missing: designSignalValues.requirement_missing as boolean,
+        capacity_missing: designSignalValues.capacity_missing as boolean,
+        tradeoff_missed: designSignalValues.tradeoff_missed as boolean,
+        spof_missed: designSignalValues.spof_missed as boolean,
+        bottleneck_unexamined: designSignalValues.bottleneck_unexamined as boolean,
+      };
+    }
+  }
+
+  return null;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
