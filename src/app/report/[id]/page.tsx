@@ -1905,12 +1905,14 @@ function SystemDesignRadar({
 
   const center = 140;
   const radius = 96;
+  const labelRadius = radius + 14;
   const axes = dimensions.map((dimension, index) => {
     const angle = (Math.PI * 2 * index) / dimensions.length - Math.PI / 2;
     const axisX = center + Math.cos(angle) * radius;
     const axisY = center + Math.sin(angle) * radius;
-    const labelX = center + Math.cos(angle) * (radius + 24);
-    const labelY = center + Math.sin(angle) * (radius + 24);
+    const rawLabelX = center + Math.cos(angle) * labelRadius;
+    const labelX = Math.max(38, Math.min(242, rawLabelX));
+    const labelY = center + Math.sin(angle) * labelRadius;
     return {
       ...dimension,
       axisX,
@@ -1936,7 +1938,12 @@ function SystemDesignRadar({
   return (
     <div style={{ ...listItemStyle, display: "grid", gap: 10 }}>
       <strong>Five-Dimension Radar</strong>
-      <svg viewBox="0 0 280 280" role="img" aria-label="System design dimension radar">
+      <svg
+        viewBox="0 0 280 280"
+        role="img"
+        aria-label="System design dimension radar"
+        style={{ width: "100%", height: "auto", overflow: "visible" }}
+      >
         {ringRadii.map((ring) => (
           <circle
             key={`radar-ring-${ring}`}
@@ -1970,9 +1977,10 @@ function SystemDesignRadar({
             key={`radar-label-${axis.key}`}
             x={axis.labelX}
             y={axis.labelY}
-            textAnchor={axis.labelX >= center ? "start" : "end"}
+            textAnchor="middle"
             dominantBaseline="middle"
-            fontSize="11"
+            fontSize="8"
+            fontWeight="600"
             fill="#2d3550"
           >
             {axis.label}
