@@ -389,6 +389,8 @@ System-design causal loop (`P4`, maintain):
   - block deep-dive when capacity prerequisite is missing
 - soft consistency penalty:
   - penalize reliability/quality when architecture contradicts stated capacity
+ - status:
+   - closed in current baseline (hard gate in decision path + soft consistency penalty in reward/report calibration)
 
 Transcript-native drill-down (`P1.5`):
 - add pointer model:
@@ -396,6 +398,8 @@ Transcript-native drill-down (`P1.5`):
 - use in report/admin/calibration:
   - report-side drill-down links each system-design evidence pin to exact transcript turn spans
   - click evidence -> highlight exact source span
+ - status:
+   - closed in current baseline (evidence pin pointers can jump to transcript drill-down highlights)
 
 Three open closure gaps to resolve next:
 1. unify `GapState` as a first-class layer before decision routing

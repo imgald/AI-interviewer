@@ -162,6 +162,21 @@ type SystemDesignDna = {
   evidencePins: SystemDesignEvidencePin[];
 };
 
+type TranscriptPointerRef = {
+  anchorId: string;
+  dimensionLabel: string;
+  turnId: string;
+  start: number;
+  length: number;
+  excerpt: string;
+};
+
+type TranscriptDrilldownRow = {
+  transcript: { id: string; speaker: "USER" | "AI" | "SYSTEM"; text: string; createdAt: Date };
+  aliases: string[];
+  pointers: TranscriptPointerRef[];
+};
+
 type ReportJson = {
   generatedAt?: string;
   questionTitle?: string;
@@ -503,6 +518,11 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
   const systemDesignDna = normalizeSystemDesignDna(reportJson.systemDesignDna);
   const systemDesignDimensionRows = systemDesignDna ? buildSystemDesignDimensionRows(systemDesignDna) : [];
   const committedTranscripts = getCommittedTranscriptSegments(session.transcripts, session.events);
+  const transcriptPointerRefs = systemDesignDna ? buildSystemDesignPointerRefs(systemDesignDna) : [];
+  const transcriptDrilldownRows = buildTranscriptDrilldownRows({
+    transcripts: committedTranscripts,
+    pointers: transcriptPointerRefs,
+  });
   const transcriptTruth = summarizeTranscriptTruth(session.transcripts, session.events);
   const replayItems = buildReplayItems({
     events: session.events,
@@ -832,21 +852,24 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
                         evidence refs: {(pin.evidenceRefs ?? []).join(", ") || "n/a"}
                       </p>
                       {Array.isArray(pin.textPointers) && pin.textPointers.length > 0 ? (
-                        <p style={{ ...mutedParagraphStyle, marginTop: 6 }}>
-                          pointers: {pin.textPointers
-                            .slice(0, 2)
-                            .map((pointer) => {
-                              const turnId = pointer.turnId ?? "n/a";
-                              const start = typeof pointer.start === "number" ? pointer.start : 0;
-                              const length = typeof pointer.length === "number" ? pointer.length : 0;
-                              const excerpt =
-                                typeof pointer.excerpt === "string" && pointer.excerpt.trim().length > 0
-                                  ? ` "${pointer.excerpt.trim()}"`
-                                  : "";
-                              return `${turnId}[${start}:${length}]${excerpt}`;
-                            })
-                            .join(" | ")}
-                        </p>
+                        <div style={{ display: "grid", gap: 6, marginTop: 6 }}>
+                          <p style={{ ...mutedParagraphStyle, marginTop: 0 }}>pointers:</p>
+                          {pin.textPointers.slice(0, 3).map((pointer, pointerIndex) => {
+                            const turnId = pointer.turnId ?? "n/a";
+                            const start = typeof pointer.start === "number" ? pointer.start : 0;
+                            const length = typeof pointer.length === "number" ? pointer.length : 0;
+                            const excerpt =
+                              typeof pointer.excerpt === "string" && pointer.excerpt.trim().length > 0
+                                ? ` "${pointer.excerpt.trim()}"`
+                                : "";
+                            const anchorId = `sd-pointer-${index}-${pointerIndex}`;
+                            return (
+                              <a key={`sd-evidence-pointer-${index}-${pointerIndex}`} href={`#${anchorId}`} style={pointerLinkStyle}>
+                                {turnId}[{start}:{length}]{excerpt}
+                              </a>
+                            );
+                          })}
+                        </div>
                       ) : null}
                     </div>
                   ))
@@ -1067,6 +1090,34 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
           <p style={{ ...mutedParagraphStyle, marginTop: 12 }}>
             Report scoring and replay now prefer the active committed transcript chain. Superseded turns remain part of audit history but should not drive evaluation or interviewer state.
           </p>
+          <div style={{ display: "grid", gap: 10, marginTop: 4 }}>
+            <strong>Transcript Drill-down</strong>
+            {transcriptDrilldownRows.length === 0 ? (
+              <p style={mutedParagraphStyle}>
+                No committed transcript span can be highlighted yet.
+              </p>
+            ) : (
+              transcriptDrilldownRows.map((row) => (
+                <div key={`transcript-drill-${row.transcript.id}`} style={transcriptTurnCardStyle}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <strong>{row.transcript.speaker}</strong>
+                    <span style={{ ...mutedParagraphStyle, fontSize: 12 }}>
+                      {row.aliases.join(" / ")}
+                    </span>
+                  </div>
+                  <p style={{ ...mutedParagraphStyle, marginTop: 8 }}>
+                    {renderTranscriptWithPointers(row.transcript.text, row.pointers)}
+                  </p>
+                  {row.pointers.length > 0 ? (
+                    <p style={{ ...mutedParagraphStyle, marginTop: 8 }}>
+                      highlighted pointers:{" "}
+                      {row.pointers.map((pointer) => pointer.dimensionLabel).join(", ")}
+                    </p>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
         </section>
 
         <section style={gridStyle}>
@@ -2112,6 +2163,130 @@ function normalizeSystemDesignDna(value: unknown): SystemDesignDna | null {
   };
 }
 
+function buildSystemDesignPointerRefs(dna: SystemDesignDna): TranscriptPointerRef[] {
+  const refs: TranscriptPointerRef[] = [];
+  dna.evidencePins.forEach((pin, pinIndex) => {
+    const dimensionLabel = systemDesignDimensionLabel(pin.dimension);
+    (pin.textPointers ?? []).forEach((pointer, pointerIndex) => {
+      if (typeof pointer.turnId !== "string" || pointer.turnId.trim().length === 0) {
+        return;
+      }
+      refs.push({
+        anchorId: `sd-pointer-${pinIndex}-${pointerIndex}`,
+        dimensionLabel,
+        turnId: pointer.turnId.trim(),
+        start: typeof pointer.start === "number" ? pointer.start : 0,
+        length: typeof pointer.length === "number" ? pointer.length : 0,
+        excerpt: typeof pointer.excerpt === "string" ? pointer.excerpt : "",
+      });
+    });
+  });
+  return refs;
+}
+
+function buildTranscriptDrilldownRows(input: {
+  transcripts: Array<{ id: string; speaker: "USER" | "AI" | "SYSTEM"; text: string; createdAt: Date }>;
+  pointers: TranscriptPointerRef[];
+}): TranscriptDrilldownRow[] {
+  const speakerCounts: Record<"USER" | "AI" | "SYSTEM", number> = { USER: 0, AI: 0, SYSTEM: 0 };
+  const rows = input.transcripts.map((transcript) => {
+    speakerCounts[transcript.speaker] += 1;
+    const speakerAlias = `${transcript.speaker}#${speakerCounts[transcript.speaker]}`;
+    return {
+      transcript,
+      aliases: [transcript.id, speakerAlias],
+      pointers: [] as TranscriptPointerRef[],
+    };
+  });
+
+  for (const pointer of input.pointers) {
+    const turnId = pointer.turnId.trim();
+    const row = rows.find((candidate) => candidate.aliases.some((alias) => alias === turnId));
+    if (!row) {
+      continue;
+    }
+    row.pointers.push(pointer);
+  }
+
+  const hasPointers = rows.some((row) => row.pointers.length > 0);
+  return hasPointers ? rows.filter((row) => row.pointers.length > 0) : rows.slice(-3);
+}
+
+function renderTranscriptWithPointers(text: string, pointers: TranscriptPointerRef[]) {
+  if (pointers.length === 0) {
+    return text;
+  }
+
+  const normalized = pointers
+    .map((pointer) => normalizePointerRange(text, pointer))
+    .filter((pointer): pointer is TranscriptPointerRef & { start: number; length: number } => pointer !== null)
+    .sort((left, right) => left.start - right.start);
+
+  if (normalized.length === 0) {
+    return text;
+  }
+
+  const rendered: Array<string | JSX.Element> = [];
+  let cursor = 0;
+
+  normalized.forEach((pointer, index) => {
+    const start = Math.max(cursor, pointer.start);
+    const end = Math.min(text.length, pointer.start + pointer.length);
+    if (end <= start) {
+      return;
+    }
+    if (start > cursor) {
+      rendered.push(text.slice(cursor, start));
+    }
+    rendered.push(
+      <mark key={`pointer-mark-${pointer.anchorId}-${index}`} id={pointer.anchorId} style={pointerMarkStyle}>
+        {text.slice(start, end)}
+      </mark>,
+    );
+    cursor = end;
+  });
+
+  if (cursor < text.length) {
+    rendered.push(text.slice(cursor));
+  }
+
+  return rendered;
+}
+
+function normalizePointerRange(text: string, pointer: TranscriptPointerRef) {
+  const fallbackLength = Math.min(text.length, 120);
+  const requestedStart = Number.isFinite(pointer.start) ? Math.max(0, Math.min(pointer.start, Math.max(0, text.length - 1))) : 0;
+  const requestedLength = Number.isFinite(pointer.length) ? Math.max(0, pointer.length) : 0;
+  if (requestedLength > 0 && requestedStart < text.length) {
+    return {
+      ...pointer,
+      start: requestedStart,
+      length: Math.min(requestedLength, text.length - requestedStart),
+    };
+  }
+
+  const excerpt = pointer.excerpt.trim();
+  if (excerpt.length > 0) {
+    const hit = text.toLowerCase().indexOf(excerpt.toLowerCase());
+    if (hit >= 0) {
+      return {
+        ...pointer,
+        start: hit,
+        length: Math.min(excerpt.length, text.length - hit),
+      };
+    }
+  }
+
+  if (fallbackLength > 0) {
+    return {
+      ...pointer,
+      start: 0,
+      length: fallbackLength,
+    };
+  }
+  return null;
+}
+
 function buildSystemDesignDimensionRows(dna: SystemDesignDna) {
   const dimensions: Array<{ key: SystemDesignDimensionKey; score: number }> = [
     { key: "requirement_clarity", score: dna.requirement_clarity },
@@ -2726,6 +2901,26 @@ const listItemStyle = {
   borderRadius: 14,
   border: "1px solid var(--border)",
   background: "var(--surface-alt)",
+} as const;
+
+const transcriptTurnCardStyle = {
+  ...listItemStyle,
+  background: "rgba(255,255,255,0.95)",
+} as const;
+
+const pointerLinkStyle = {
+  ...mutedParagraphStyle,
+  color: "var(--accent-strong)",
+  textDecoration: "underline",
+  textUnderlineOffset: 3,
+  fontSize: 13,
+} as const;
+
+const pointerMarkStyle = {
+  background: "rgba(255, 224, 120, 0.55)",
+  borderRadius: 4,
+  padding: "0 2px",
+  border: "1px solid rgba(184, 110, 0, 0.35)",
 } as const;
 
 function replayCardStyle(tone: ReplayItem["tone"]) {

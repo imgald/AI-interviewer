@@ -200,6 +200,22 @@ export function evaluateTurnReward(input: RewardInput): RewardResult {
       designEvidenceTypes.add("handwave");
     }
 
+    const capacityReady = latestDesignSignals?.capacity_missing === false;
+    const reliabilityGapOpen =
+      latestDesignSignals?.spof_missed === true || latestDesignSignals?.bottleneck_unexamined === true;
+    const addressesReliabilityGap =
+      hasAny(target ?? "", ["spof", "bottleneck", "reliability", "correctness"]) ||
+      hasAny(action ?? "", ["challenge", "zoom"]);
+    const isClosingMove =
+      action === "move_to_wrap_up" ||
+      action === "close_topic" ||
+      action === "end_interview" ||
+      systemDesignActionType === "wrap_up";
+    if (capacityReady && reliabilityGapOpen && !addressesReliabilityGap) {
+      riskIdentified = clamp(riskIdentified + (isClosingMove ? -0.45 : -0.25), -1, 1);
+      penalties.push("capacity_reliability_inconsistency");
+    }
+
     const pivot = detectPivotMoment({
       recentEvents: input.recentEvents,
       decision: input.decision,

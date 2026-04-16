@@ -289,4 +289,64 @@ describe("evaluateTurnReward", () => {
     expect(reward.components.handwavePenalty).toBe(0);
     expect(reward.components.pivotImpact).toBe(0);
   });
+
+  it("applies cross-stage consistency penalty when capacity is claimed but reliability gaps stay unresolved", () => {
+    const wrapWithoutReliabilityProbe = evaluateTurnReward({
+      stage: "WRAP_UP",
+      decision: {
+        action: "move_to_wrap_up",
+        target: "summary",
+        systemDesignActionType: "WRAP_UP",
+      },
+      recentEvents: [
+        {
+          eventType: "SIGNAL_SNAPSHOT_RECORDED",
+          payloadJson: {
+            signals: {
+              designSignals: {
+                signals: {
+                  requirement_missing: false,
+                  capacity_missing: false,
+                  tradeoff_missed: false,
+                  spof_missed: true,
+                  bottleneck_unexamined: true,
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    const reliabilityProbe = evaluateTurnReward({
+      stage: "DEEP_DIVE",
+      decision: {
+        action: "ask_followup",
+        target: "spof",
+        systemDesignActionType: "CHALLENGE_SPOF",
+      },
+      recentEvents: [
+        {
+          eventType: "SIGNAL_SNAPSHOT_RECORDED",
+          payloadJson: {
+            signals: {
+              designSignals: {
+                signals: {
+                  requirement_missing: false,
+                  capacity_missing: false,
+                  tradeoff_missed: false,
+                  spof_missed: true,
+                  bottleneck_unexamined: true,
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    expect(wrapWithoutReliabilityProbe.penalties).toContain("capacity_reliability_inconsistency");
+    expect(wrapWithoutReliabilityProbe.components.riskIdentified).toBeLessThan(0);
+    expect(wrapWithoutReliabilityProbe.total).toBeLessThan(reliabilityProbe.total);
+  });
 });

@@ -762,6 +762,76 @@ it("emits system design DNA with evidence pinning when mode is SYSTEM_DESIGN", (
   ).toBe(true);
 });
 
+it("builds usable text pointers from transcript segment ids when evidence refs are sparse", () => {
+  const report = generateSessionReport({
+    sessionId: "session-sd-pointer-fallback",
+    mode: "SYSTEM_DESIGN",
+    questionTitle: "Design Timeline Feed",
+    transcripts: [
+      {
+        id: "seg-pointer-1",
+        speaker: "USER",
+        text: "We can keep a write fanout queue and shard by author id to control feed amplification under spikes.",
+      },
+    ],
+    events: [
+      {
+        eventType: "SIGNAL_SNAPSHOT_RECORDED",
+        payloadJson: {
+          stage: "HIGH_LEVEL",
+          signals: {
+            designSignals: {
+              signals: {
+                requirement_missing: false,
+                capacity_missing: false,
+                tradeoff_missed: true,
+                spof_missed: true,
+                bottleneck_unexamined: true,
+              },
+              evidenceRefs: {
+                requirement_missing: ["No direct candidate evidence in recent turns."],
+                capacity_missing: ["No direct candidate evidence in recent turns."],
+                tradeoff_missed: ["No direct candidate evidence in recent turns."],
+                spof_missed: ["No direct candidate evidence in recent turns."],
+                bottleneck_unexamined: ["No direct candidate evidence in recent turns."],
+              },
+            },
+          },
+        },
+      },
+      {
+        eventType: "REWARD_RECORDED",
+        payloadJson: {
+          reward: {
+            total: 0.22,
+            designEvidenceTypes: ["requirement"],
+          },
+          trace: {
+            transcriptSegmentId: "seg-pointer-1",
+          },
+        },
+      },
+    ],
+    executionRuns: [],
+  });
+
+  const reportJson = report.reportJson as Record<string, unknown>;
+  const systemDesignDna = (reportJson.systemDesignDna as Record<string, unknown>) ?? {};
+  const evidencePins = (systemDesignDna.evidencePins as Array<Record<string, unknown>>) ?? [];
+  const requirementPin = evidencePins.find((item) => item.dimension === "requirement_clarity") ?? {};
+  const textPointers = Array.isArray(requirementPin.textPointers)
+    ? (requirementPin.textPointers as Array<Record<string, unknown>>)
+    : [];
+  const first = textPointers[0] ?? {};
+
+  expect(textPointers.length).toBeGreaterThan(0);
+  expect(first.turnId).toBe("seg-pointer-1");
+  expect(typeof first.start).toBe("number");
+  expect(typeof first.length).toBe("number");
+  expect((first.length as number)).toBeGreaterThan(0);
+  expect(typeof first.excerpt).toBe("string");
+});
+
 it("applies non-linear cap to system design level recommendation when tradeoff depth is missing", () => {
   const report = generateSessionReport({
     sessionId: "session-sd-cap-1",

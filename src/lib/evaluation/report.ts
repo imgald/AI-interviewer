@@ -11,6 +11,7 @@ import { summarizeSessionCritic, type SessionCriticSummary } from "@/lib/assista
 import type { Recommendation } from "@prisma/client";
 
 type TranscriptLike = {
+  id?: string;
   speaker: "USER" | "AI" | "SYSTEM";
   text: string;
 };
@@ -2479,12 +2480,59 @@ function buildTextPointers(input: {
     return pointers;
   }
 
-  return input.turnIds.slice(0, 2).map((turnId) => ({
-    turnId,
-    start: 0,
-    length: 0,
-    excerpt: "",
-  }));
+  const fallbackPointers: Array<{
+    turnId: string;
+    start: number;
+    length: number;
+    excerpt: string;
+  }> = [];
+
+  for (const turnId of input.turnIds.slice(0, 3)) {
+    const direct = input.transcripts.find((item) => typeof item.id === "string" && item.id === turnId);
+    if (direct && direct.text.trim().length > 0) {
+      const length = Math.min(direct.text.length, 90);
+      fallbackPointers.push({
+        turnId,
+        start: 0,
+        length,
+        excerpt: direct.text.slice(0, length),
+      });
+      continue;
+    }
+
+    const alias = parseTurnAlias(turnId);
+    if (!alias) {
+      continue;
+    }
+    const transcript = bySpeaker[alias.speaker][alias.index - 1];
+    if (!transcript || transcript.text.trim().length === 0) {
+      continue;
+    }
+    const length = Math.min(transcript.text.length, 90);
+    fallbackPointers.push({
+      turnId: `${alias.speaker}#${alias.index}`,
+      start: 0,
+      length,
+      excerpt: transcript.text.slice(0, length),
+    });
+  }
+
+  if (fallbackPointers.length > 0) {
+    return fallbackPointers;
+  }
+
+  return input.transcripts
+    .filter((item) => item.speaker !== "SYSTEM" && item.text.trim().length > 0)
+    .slice(0, 2)
+    .map((transcript, index) => {
+      const length = Math.min(transcript.text.length, 90);
+      return {
+        turnId: `${transcript.speaker}#${index + 1}`,
+        start: 0,
+        length,
+        excerpt: transcript.text.slice(0, length),
+      };
+    });
 }
 
 function parseEvidenceTurnRef(ref: string): { speaker: "USER" | "AI" | "SYSTEM"; index: number; snippet: string } | null {
@@ -2502,6 +2550,22 @@ function parseEvidenceTurnRef(ref: string): { speaker: "USER" | "AI" | "SYSTEM";
     speaker,
     index,
     snippet,
+  };
+}
+
+function parseTurnAlias(ref: string): { speaker: "USER" | "AI" | "SYSTEM"; index: number } | null {
+  const match = /^(USER|AI|SYSTEM)#(\d+)$/i.exec(ref.trim());
+  if (!match) {
+    return null;
+  }
+  const speaker = match[1]?.toUpperCase();
+  const index = Number(match[2]);
+  if ((speaker !== "USER" && speaker !== "AI" && speaker !== "SYSTEM") || !Number.isFinite(index) || index < 1) {
+    return null;
+  }
+  return {
+    speaker,
+    index,
   };
 }
 
