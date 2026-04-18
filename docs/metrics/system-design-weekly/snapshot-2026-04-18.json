@@ -1,6 +1,6 @@
 {
   "snapshot": {
-    "generatedAt": "2026-04-18T02:13:34.553Z",
+    "generatedAt": "2026-04-18T14:03:17.104Z",
     "calibration": {
       "total": 60,
       "matched": 45,
@@ -168,9 +168,9 @@
   },
   "drift": {
     "hasBaseline": true,
-    "calibrationAccuracyDelta": 0.17,
+    "calibrationAccuracyDelta": 0,
     "regressionPassRateDelta": 0,
     "expectationFlips": [],
-    "summary": "Drift stable. calibration_delta=+0.17, pass_rate_delta=0.00."
+    "summary": "Drift stable. calibration_delta=0.00, pass_rate_delta=0.00."
   }
 }

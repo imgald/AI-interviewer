@@ -10,6 +10,11 @@ export type SystemDesignWeeklySnapshot = {
     byLevel: Record<"Mid-level" | "Senior" | "Staff", number>;
     byHire: Record<"NO_HIRE" | "BORDERLINE" | "HIRE" | "STRONG_HIRE", number>;
   };
+  realCalibration?: {
+    total: number;
+    levelAccuracy: number;
+    verdictAccuracy: number;
+  };
   regression: {
     health: {
       lateBloomerRecovered: boolean;

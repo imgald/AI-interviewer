@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { access } from "node:fs/promises";
 import {
   evaluateSystemDesignRegressionHealth,
   evaluateSystemDesignRegressionStability,
@@ -9,6 +10,10 @@ import {
   evaluateSystemDesignCalibrationPack,
   summarizeSystemDesignCalibrationPack,
 } from "@/lib/evaluation/system-design-calibration";
+import {
+  evaluateRealCalibrationLabels,
+  loadRealCalibrationLabelsFromJsonl,
+} from "@/lib/evaluation/system-design-real-calibration";
 import {
   buildSystemDesignDriftReport,
   type SystemDesignWeeklySnapshot,
@@ -26,9 +31,14 @@ async function tryReadPreviousSnapshot(): Promise<SystemDesignWeeklySnapshot | n
   }
 }
 
-function buildCurrentSnapshot(): SystemDesignWeeklySnapshot {
+async function buildCurrentSnapshotAsync(): Promise<SystemDesignWeeklySnapshot> {
   const calibration = evaluateSystemDesignCalibrationPack();
   const coverage = summarizeSystemDesignCalibrationPack();
+  const realDatasetPath = path.join(process.cwd(), "data", "system-design-calibration", "real-transcripts.jsonl");
+  const hasRealDataset = await hasFile(realDatasetPath);
+  const realCalibration = hasRealDataset
+    ? evaluateRealCalibrationLabels(await loadRealCalibrationLabelsFromJsonl(realDatasetPath))
+    : null;
   const lab = runSystemDesignRegressionLab();
   const reports = lab.map((item) => ({
     scenarioId: item.scenarioId,
@@ -47,6 +57,15 @@ function buildCurrentSnapshot(): SystemDesignWeeklySnapshot {
       accuracy: calibration.accuracy,
     },
     calibrationCoverage: coverage,
+    ...(realCalibration
+      ? {
+          realCalibration: {
+            total: realCalibration.total,
+            levelAccuracy: realCalibration.levelAccuracy,
+            verdictAccuracy: realCalibration.verdictAccuracy,
+          },
+        }
+      : {}),
     regression: {
       health,
       stability: {
@@ -64,7 +83,7 @@ function buildCurrentSnapshot(): SystemDesignWeeklySnapshot {
 
 async function main() {
   const previous = await tryReadPreviousSnapshot();
-  const current = buildCurrentSnapshot();
+  const current = await buildCurrentSnapshotAsync();
   const drift = buildSystemDesignDriftReport({
     current,
     previous,
@@ -104,3 +123,12 @@ main().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });
+
+async function hasFile(filePath: string) {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
