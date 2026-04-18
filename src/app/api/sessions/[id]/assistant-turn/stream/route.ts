@@ -10,12 +10,17 @@ import { persistSessionSnapshots } from "@/lib/session/snapshots";
 import { guardSystemDesignStageTransition } from "@/lib/assistant/pass_conditions";
 import { assessSessionBudget, buildBudgetExceededReply } from "@/lib/usage/budget";
 import { resolveLowCostMode } from "@/lib/usage/cost";
+import { enforceMutationGuard } from "@/lib/security/request-guard";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
 export async function POST(request: Request, { params }: RouteContext) {
+  const guarded = enforceMutationGuard(request, "assistant_turn");
+  if (guarded) {
+    return guarded;
+  }
   const { id } = await params;
 
   const session = await prisma.interviewSession.findUnique({

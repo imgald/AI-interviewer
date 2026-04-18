@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { fail, ok } from "@/lib/http";
+import { enforceMutationGuard } from "@/lib/security/request-guard";
 import { createSessionEventSchema } from "@/schemas/session-runtime";
 
 type RouteContext = {
@@ -29,6 +30,10 @@ export async function GET(_: Request, { params }: RouteContext) {
 }
 
 export async function POST(request: Request, { params }: RouteContext) {
+  const guarded = enforceMutationGuard(request, "event_write");
+  if (guarded) {
+    return guarded;
+  }
   const { id } = await params;
   const body = await request.json().catch(() => null);
   const parsed = createSessionEventSchema.safeParse(body);

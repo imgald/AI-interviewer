@@ -156,7 +156,13 @@ type SystemDesignDna = {
   reliability_awareness: number;
   bottleneck_sensitivity: number;
   levelRecommendation?: string;
+  rawLevel?: string;
+  cappedLevel?: string;
+  verdict?: string;
+  confidence?: number;
+  appliedCaps?: string[];
   calibrationNotes?: string[];
+  whyNotHigher?: string[];
   strengths?: string[];
   weaknesses?: string[];
   strongest_signals?: Array<{
@@ -810,6 +816,13 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
                 <SystemDesignRadar dimensions={systemDesignDimensionRows} maxScore={5} />
                 <div style={{ display: "grid", gap: 10 }}>
                   <MetricRow label="Level Recommendation" value={systemDesignDna.levelRecommendation ?? "Mid-level"} />
+                  <MetricRow label="Raw Level" value={systemDesignDna.rawLevel ?? "n/a"} />
+                  <MetricRow label="Capped Level" value={systemDesignDna.cappedLevel ?? "n/a"} />
+                  <MetricRow label="Verdict" value={systemDesignDna.verdict ?? "n/a"} />
+                  <MetricRow
+                    label="Confidence"
+                    value={typeof systemDesignDna.confidence === "number" ? `${Math.round(systemDesignDna.confidence * 100)}%` : "n/a"}
+                  />
                   <div style={{ display: "grid", gap: 8 }}>
                     {systemDesignDimensionRows.map((dimension) => (
                       <div key={`sd-row-${dimension.key}`} style={listItemStyle}>
@@ -828,6 +841,18 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
                   <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
                     {systemDesignDna.calibrationNotes.map((note, index) => (
                       <div key={`sd-calibration-note-${index}`} style={listItemStyle}>
+                        {note}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {Array.isArray(systemDesignDna.whyNotHigher) && systemDesignDna.whyNotHigher.length > 0 ? (
+                <div style={listItemStyle}>
+                  <strong>Why Not Higher</strong>
+                  <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+                    {systemDesignDna.whyNotHigher.map((note, index) => (
+                      <div key={`sd-why-not-higher-${index}`} style={listItemStyle}>
                         {note}
                       </div>
                     ))}
@@ -2273,7 +2298,13 @@ function normalizeSystemDesignDna(value: unknown): SystemDesignDna | null {
     reliability_awareness: reliability,
     bottleneck_sensitivity: bottleneck,
     levelRecommendation: stringValue(record.levelRecommendation) ?? undefined,
+    rawLevel: stringValue(record.rawLevel) ?? undefined,
+    cappedLevel: stringValue(record.cappedLevel) ?? undefined,
+    verdict: stringValue(record.verdict) ?? undefined,
+    confidence: numericValue(record.confidence) ?? undefined,
+    appliedCaps: asStringArray(record.appliedCaps),
     calibrationNotes: asStringArray(record.calibrationNotes),
+    whyNotHigher: asStringArray(record.whyNotHigher),
     strengths: asStringArray(record.strengths),
     weaknesses: asStringArray(record.weaknesses),
     strongest_signals: strongestSignals,

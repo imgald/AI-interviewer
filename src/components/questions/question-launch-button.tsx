@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { getSystemDesignLevelExpectation } from "@/lib/interview/system-design-level-expectations";
 
 const SYSTEM_DESIGN_LEVEL_OPTIONS = [
   { value: "NEW_GRAD", label: "New Grad" },
@@ -35,6 +36,7 @@ export function QuestionLaunchButton({
   const [error, setError] = useState<string | null>(null);
   const [showLevelPicker, setShowLevelPicker] = useState(false);
   const [selectedSystemDesignLevel, setSelectedSystemDesignLevel] = useState<TargetLevel>("SDE2");
+  const selectedExpectation = getSystemDesignLevelExpectation(selectedSystemDesignLevel);
 
   async function createSessionAndLaunch(resolvedTargetLevel: TargetLevel) {
     setError(null);
@@ -139,6 +141,22 @@ export function QuestionLaunchButton({
                 </button>
               );
             })}
+          </div>
+          <div
+            style={{
+              border: "1px solid var(--border)",
+              borderRadius: 10,
+              background: "var(--surface-alt)",
+              padding: "8px 10px",
+              display: "grid",
+              gap: 6,
+            }}
+          >
+            <strong style={{ fontSize: 12 }}>Level Expectation: {selectedExpectation.label}</strong>
+            <span style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.45 }}>{selectedExpectation.focus}</span>
+            <span style={{ color: "var(--muted)", fontSize: 12, lineHeight: 1.45 }}>
+              <strong>Pass bar:</strong> {selectedExpectation.passBar}
+            </span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button

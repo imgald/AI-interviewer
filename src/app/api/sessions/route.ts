@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { buildAppliedPromptContext, buildPersonaSnapshot } from "@/lib/persona/build-persona-context";
 import { fail, ok } from "@/lib/http";
 import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
+import { enforceMutationGuard } from "@/lib/security/request-guard";
 import { createSessionSchema } from "@/schemas/session";
 import { CompanyStyle } from "@prisma/client";
 import type { z } from "zod";
@@ -65,6 +66,10 @@ async function findQuestionForSession(input: CreateSessionInput) {
 }
 
 export async function POST(request: Request) {
+  const guarded = enforceMutationGuard(request, "session_create");
+  if (guarded) {
+    return guarded;
+  }
   const body = await request.json().catch(() => null);
   const parsed = createSessionSchema.safeParse(body);
 

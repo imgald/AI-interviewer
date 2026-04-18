@@ -15,6 +15,7 @@ import {
   type SystemDesignStage,
 } from "@/lib/assistant/stages";
 import { getStarterCode, isRunnableLanguage, normalizeLanguage, toMonacoLanguage } from "@/lib/interview/editor";
+import { getSystemDesignLevelExpectation } from "@/lib/interview/system-design-level-expectations";
 import { SystemDesignWhiteboard } from "@/components/interview/system-design-whiteboard";
 import type { WhiteboardWeakSignals } from "@/lib/interview/whiteboard-signals";
 import { SESSION_EVENT_TYPES } from "@/lib/session/event-types";
@@ -533,6 +534,10 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
   const isDebugMode = viewMode === "debug";
   const isInterviewMode = viewMode === "interview";
   const isSystemDesignMode = props.mode === "SYSTEM_DESIGN";
+  const systemDesignExpectation = useMemo(
+    () => (isSystemDesignMode ? getSystemDesignLevelExpectation(props.targetLevel) : null),
+    [isSystemDesignMode, props.targetLevel],
+  );
   const currentStage = useMemo(() => {
     if (events.length === 0 && transcripts.length === 0 && !latestRun) {
       return props.initialStage;
@@ -1674,6 +1679,31 @@ export function InterviewRoomClient(props: InterviewRoomClientProps) {
                       {props.questionPrompt}
                     </div>
                   </div>
+                  {isSystemDesignMode && systemDesignExpectation ? (
+                    <div
+                      style={{
+                        padding: 14,
+                        borderRadius: 14,
+                        border: "1px solid var(--border)",
+                        background: "rgba(255,255,255,0.86)",
+                        display: "grid",
+                        gap: 8,
+                      }}
+                    >
+                      <strong>Interview Expectation ({systemDesignExpectation.label})</strong>
+                      <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.55 }}>{systemDesignExpectation.focus}</p>
+                      <p style={{ margin: 0, color: "var(--muted)", lineHeight: 1.55 }}>
+                        <strong>Pass bar:</strong> {systemDesignExpectation.passBar}
+                      </p>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        {systemDesignExpectation.mustCover.map((item) => (
+                          <span key={item} style={stagePillStyle}>
+                            {item}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </aside>

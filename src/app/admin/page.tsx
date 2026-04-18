@@ -6,6 +6,7 @@ import {
   runPolicyRegressionLab,
   runSystemDesignRegressionLab,
 } from "@/lib/assistant/policy-regression";
+import { readSystemDesignMonitoringSnapshot } from "@/lib/operations/system-design-monitoring";
 
 export const dynamic = "force-dynamic";
 
@@ -13,11 +14,31 @@ type AdminPageProps = {
   searchParams?: Promise<{
     profileId?: string;
     scope?: OpsFeedScope;
+    token?: string;
   }>;
 };
 
 export default async function AdminPage({ searchParams }: AdminPageProps) {
   const params = (await searchParams) ?? {};
+  const requiredToken = process.env.ADMIN_DASHBOARD_TOKEN?.trim();
+  const providedToken = typeof params.token === "string" ? params.token.trim() : "";
+  const tokenSuffix = providedToken ? `&token=${encodeURIComponent(providedToken)}` : "";
+  if (requiredToken && providedToken !== requiredToken) {
+    return (
+      <main style={{ minHeight: "100vh", padding: 24 }}>
+        <div style={{ width: "min(900px, 100%)", margin: "0 auto", display: "grid", gap: 16 }}>
+          <section style={cardStyle}>
+            <div style={{ padding: 20, display: "grid", gap: 10 }}>
+              <h1 style={{ margin: 0 }}>Admin Access Restricted</h1>
+              <p style={{ margin: 0, color: "var(--muted)" }}>
+                This environment requires `ADMIN_DASHBOARD_TOKEN` to view `/admin`.
+              </p>
+            </div>
+          </section>
+        </div>
+      </main>
+    );
+  }
   const profiles = await listAdminProfiles(24);
   const activeProfileId = params.profileId ?? profiles[0]?.id;
   const scope: OpsFeedScope =
@@ -29,6 +50,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
   const systemDesignLab = runSystemDesignRegressionLab();
   const systemDesignHealth = evaluateSystemDesignRegressionHealth(systemDesignLab);
   const tuningSuggestions = derivePolicyTuningSuggestions(policyLab);
+  const monitoring = await readSystemDesignMonitoringSnapshot();
 
   return (
     <main style={{ minHeight: "100vh", padding: 24 }}>
@@ -66,6 +88,67 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
           </div>
         </header>
 
+        {monitoring ? (
+          <section style={cardStyle}>
+            <div style={{ padding: 20, display: "grid", gap: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div>
+                  <h2 style={{ margin: 0 }}>System Design Monitoring Baseline</h2>
+                  <p style={{ margin: "6px 0 0", color: "var(--muted)" }}>
+                    Weekly calibration/regression/drift metrics surfaced directly in admin.
+                  </p>
+                </div>
+                <span
+                  style={{
+                    ...stagePillStyle,
+                    borderColor:
+                      monitoring.status === "critical"
+                        ? "rgba(191, 28, 28, 0.35)"
+                        : monitoring.status === "warning"
+                          ? "rgba(201, 138, 0, 0.35)"
+                          : "rgba(19, 115, 51, 0.35)",
+                    background:
+                      monitoring.status === "critical"
+                        ? "rgba(191, 28, 28, 0.12)"
+                        : monitoring.status === "warning"
+                          ? "rgba(201, 138, 0, 0.12)"
+                          : "rgba(19, 115, 51, 0.12)",
+                  }}
+                >
+                  status: {monitoring.status}
+                </span>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gap: 12,
+                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                }}
+              >
+                <MetricCard label="Calibration Accuracy" value={monitoring.metrics.calibrationAccuracy.toFixed(2)} />
+                <MetricCard label="Regression Pass Rate" value={monitoring.metrics.regressionPassRate.toFixed(2)} />
+                <MetricCard label="Calibration Drift Δ" value={monitoring.metrics.calibrationDelta.toFixed(3)} />
+                <MetricCard label="Expectation Flips" value={String(monitoring.metrics.expectationFlips)} />
+              </div>
+
+              {monitoring.alerts.length > 0 ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  <strong>Active Alerts</strong>
+                  {monitoring.alerts.map((alert, index) => (
+                    <div key={`monitoring-alert-${index}`} style={panelStyle}>
+                      <strong>{alert.severity.toUpperCase()}</strong>
+                      <p style={{ margin: "6px 0 0", color: "var(--muted)" }}>{alert.message}</p>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ margin: 0, color: "var(--muted)" }}>No active monitoring alerts.</p>
+              )}
+            </div>
+          </section>
+        ) : null}
+
         <section style={{ display: "grid", gap: 18, gridTemplateColumns: "320px 1fr" }}>
           <aside style={cardStyle}>
             <div style={{ padding: 20, display: "grid", gap: 14 }}>
@@ -85,7 +168,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     return (
                       <Link
                         key={profile.id}
-                        href={`/admin?profileId=${profile.id}&scope=${scope}`}
+                        href={`/admin?profileId=${profile.id}&scope=${scope}${tokenSuffix}`}
                         style={{
                           padding: 14,
                           borderRadius: 14,
@@ -121,13 +204,13 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                     </p>
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <ScopePill active={scope === "all"} href={`/admin?profileId=${activeProfileId}&scope=all`}>
+                    <ScopePill active={scope === "all"} href={`/admin?profileId=${activeProfileId}&scope=all${tokenSuffix}`}>
                       All Events
                     </ScopePill>
-                    <ScopePill active={scope === "persona"} href={`/admin?profileId=${activeProfileId}&scope=persona`}>
+                    <ScopePill active={scope === "persona"} href={`/admin?profileId=${activeProfileId}&scope=persona${tokenSuffix}`}>
                       Persona Only
                     </ScopePill>
-                    <ScopePill active={scope === "session"} href={`/admin?profileId=${activeProfileId}&scope=session`}>
+                    <ScopePill active={scope === "session"} href={`/admin?profileId=${activeProfileId}&scope=session${tokenSuffix}`}>
                       Session Only
                     </ScopePill>
                   </div>

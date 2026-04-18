@@ -215,6 +215,12 @@ OPENAI_STT_MODEL="gpt-4o-mini-transcribe"
 STT_PROVIDER=""
 ASSEMBLYAI_API_KEY=""
 ASSEMBLYAI_STT_MODELS="universal-3-pro,universal-2"
+ADMIN_DASHBOARD_TOKEN=""
+API_RATE_LIMIT_ENABLED="0"
+SESSION_CREATE_RATE_LIMIT_RPM="30"
+ASSISTANT_TURN_RATE_LIMIT_RPM="120"
+TRANSCRIPT_WRITE_RATE_LIMIT_RPM="240"
+EVENT_WRITE_RATE_LIMIT_RPM="240"
 ```
 
 When STT credentials are configured:
@@ -223,6 +229,9 @@ When STT credentials are configured:
 - `ASSEMBLYAI_API_KEY` + `STT_PROVIDER=assemblyai` enables AssemblyAI STT
 - if both are present and `STT_PROVIDER` is unset, the app currently prefers AssemblyAI for dedicated STT
 - interviewer text generation can still use Gemini or OpenAI independently of the STT provider choice
+- optional hardening:
+  - set `ADMIN_DASHBOARD_TOKEN` to protect `/admin`
+  - set `API_RATE_LIMIT_ENABLED=1` to enforce mutation endpoint throttles with the RPM knobs above
 
 ## Test Commands
 
@@ -249,6 +258,9 @@ npm run build
 ```powershell
 # print calibration + regression summary JSON
 npm run eval:system-design
+
+# run real transcript calibration pack (JSONL labels)
+npm run eval:system-design:real -- --in data/system-design-calibration/real-transcripts.jsonl
 
 # optional: write snapshot JSON to a file
 npm run eval:system-design -- --out artifacts/system-design-eval.json
@@ -339,6 +351,8 @@ This README is intentionally condensed for fast context loading.
   - [System Design Monitoring Baseline](docs/operations/system-design-monitoring-baseline.md)
 - Release operations playbook:
   - [Go-Live Runbook](docs/release/go-live-runbook.md)
+- Real transcript calibration dataset guide:
+  - [Real Transcript Calibration Pack](docs/datasets/system-design-calibration/README.md)
 
 ### Roadmap v2.3: Unified Scoring & Calibration Phase (Execution)
 
@@ -497,6 +511,15 @@ Closure verification (2026-04-18):
   - [Go-Live Runbook](docs/release/go-live-runbook.md)
   - `npm run check:system-design-alerts`
   - [.github/workflows/system-design-monitoring.yml](.github/workflows/system-design-monitoring.yml)
+- Real transcript calibration pipeline added:
+  - [Real Transcript Calibration Pack](docs/datasets/system-design-calibration/README.md)
+  - [Sample JSONL](docs/datasets/system-design-calibration/real-transcripts.sample.jsonl)
+  - `npm run eval:system-design:real -- --in data/system-design-calibration/real-transcripts.jsonl`
+- Polish items `2~5` closed:
+  - Report now exposes explicit `raw vs capped` level, verdict/confidence, and `Why Not Higher` reasoning.
+  - System-design level expectations are shown in both question launch and interview room.
+  - `/admin` includes weekly system-design monitoring snapshot and alert status.
+  - Mutation APIs support optional production rate-limiting (env-gated, off by default).
 
 ### Final Closure Checklist (Priority-Ordered)
 

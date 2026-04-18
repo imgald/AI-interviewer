@@ -361,7 +361,13 @@ type SystemDesignDna = {
   reliability_awareness: number;
   bottleneck_sensitivity: number;
   levelRecommendation: "Mid-level" | "Senior" | "Staff";
+  rawLevel?: "L3" | "L4" | "L5" | "L6";
+  cappedLevel?: "L3" | "L4" | "L5" | "L6";
+  verdict?: "NO_HIRE" | "BORDERLINE" | "HIRE" | "STRONG_HIRE";
+  confidence?: number;
+  appliedCaps?: string[];
   calibrationNotes?: string[];
+  whyNotHigher?: string[];
   strengths: string[];
   weaknesses: string[];
   strongest_signals?: Array<{
@@ -2405,6 +2411,14 @@ function buildSystemDesignDna(input: {
     confidence: unifiedScore.confidence,
     turnIds: pivotTurnIds,
   });
+  const whyNotHigher = buildSystemDesignWhyNotHigher({
+    rawLevel: unifiedScore.rawLevel,
+    cappedLevel: unifiedScore.cappedLevel,
+    confidence: unifiedScore.confidence,
+    appliedCaps: unifiedScore.appliedCaps,
+    blockingDimensions,
+    gapBreakdown: unifiedScore.gapBreakdown,
+  });
 
   return {
     requirement_clarity: Number((unifiedScore.dimensionScores.requirement_clarity ?? requirementScore).toFixed(2)),
@@ -2413,7 +2427,13 @@ function buildSystemDesignDna(input: {
     reliability_awareness: Number((unifiedScore.dimensionScores.reliability_awareness ?? reliabilityScore).toFixed(2)),
     bottleneck_sensitivity: Number((unifiedScore.dimensionScores.bottleneck_sensitivity ?? bottleneckScore).toFixed(2)),
     levelRecommendation,
+    rawLevel: unifiedScore.rawLevel,
+    cappedLevel: unifiedScore.cappedLevel,
+    verdict: unifiedScore.verdict,
+    confidence: Number(unifiedScore.confidence.toFixed(2)),
+    appliedCaps: unifiedScore.appliedCaps,
     calibrationNotes: [...levelCapResult.notes, ...unifiedScore.explanation],
+    whyNotHigher,
     strengths: strengths.slice(0, 3),
     weaknesses: weaknesses.slice(0, 3),
     strongest_signals: strongestSignals,
@@ -2595,6 +2615,42 @@ function buildSystemDesignPivotEffects(input: {
       turnIds: input.turnIds,
     },
   ];
+}
+
+function buildSystemDesignWhyNotHigher(input: {
+  rawLevel: "L3" | "L4" | "L5" | "L6";
+  cappedLevel: "L3" | "L4" | "L5" | "L6";
+  confidence: number;
+  appliedCaps: string[];
+  blockingDimensions: NonNullable<SystemDesignDna["blocking_dimensions"]>;
+  gapBreakdown:
+    | {
+        totalPenalty: number;
+        stageMultiplier: number;
+        byGap: Record<"capacity" | "tradeoff" | "reliability" | "bottleneck", number>;
+        openGapCount: number;
+      }
+    | undefined;
+}) {
+  const reasons: string[] = [];
+  if (input.rawLevel !== input.cappedLevel) {
+    reasons.push(`Hard caps lowered level from ${input.rawLevel} to ${input.cappedLevel}.`);
+  }
+  if (input.appliedCaps.length > 0) {
+    reasons.push(`Applied caps: ${input.appliedCaps.join(", ")}.`);
+  }
+  if (input.gapBreakdown && input.gapBreakdown.openGapCount > 0) {
+    reasons.push(
+      `Open gap count=${input.gapBreakdown.openGapCount} with stage-weighted penalty ${input.gapBreakdown.totalPenalty.toFixed(2)}.`,
+    );
+  }
+  for (const item of input.blockingDimensions.slice(0, 2)) {
+    reasons.push(`${toSystemDesignDimensionLabel(item.dimension)} remained a blocker (${item.score.toFixed(2)}/5).`);
+  }
+  if (input.confidence < 0.7) {
+    reasons.push(`Confidence stayed at ${(input.confidence * 100).toFixed(0)}%, which reduced upgrade certainty.`);
+  }
+  return reasons.slice(0, 5);
 }
 
 function toSystemDesignDimensionLabel(
