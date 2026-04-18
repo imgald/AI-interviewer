@@ -258,6 +258,9 @@ npm run eval:system-design:weekly
 
 # enforce release gates (calibration + regression + stability thresholds)
 npm run check:system-design-gates
+
+# evaluate warning/critical monitoring thresholds from weekly metrics snapshots
+npm run check:system-design-alerts
 ```
 
 ## Current Test Coverage
@@ -332,6 +335,10 @@ This README is intentionally condensed for fast context loading.
   - [Roadmap Archive](docs/roadmaps/roadmap-archive-2026-04-12.md)
 - Current system-design execution status and phase notes:
   - [System Design Execution Plan](docs/roadmaps/roadmap-archive-2026-04-12.md#system-design-interviewer-execution-roadmap-v2-final-executable)
+- Monitoring and alert baseline:
+  - [System Design Monitoring Baseline](docs/operations/system-design-monitoring-baseline.md)
+- Release operations playbook:
+  - [Go-Live Runbook](docs/release/go-live-runbook.md)
 
 ### Roadmap v2.3: Unified Scoring & Calibration Phase (Execution)
 
@@ -485,6 +492,11 @@ Closure verification (2026-04-18):
 - `P1` report UX validation updates:
   - evidence-pin anchor ids are now centralized and consistent between pin links and transcript highlights
   - radar chart readability improved with responsive layout, padded viewBox, and wrapped inward label alignment
+- Monitoring + release operations assets added:
+  - [System Design Monitoring Baseline](docs/operations/system-design-monitoring-baseline.md)
+  - [Go-Live Runbook](docs/release/go-live-runbook.md)
+  - `npm run check:system-design-alerts`
+  - [.github/workflows/system-design-monitoring.yml](.github/workflows/system-design-monitoring.yml)
 
 ### Final Closure Checklist (Priority-Ordered)
 
@@ -497,10 +509,10 @@ Closure verification (2026-04-18):
 - [x] `P1` Final report UX validation pass:
   - evidence pin click-through and text pointer jump checks
   - radar readability checks across common viewport sizes.
-- [ ] `P1` Production monitoring baseline:
+- [x] `P1` Production monitoring baseline:
   - calibration/pass-rate/drift dashboards
   - alert thresholds and on-call response notes.
-- [ ] `P1` Release runbook completion:
+- [x] `P1` Release runbook completion:
   - go-live checklist
   - rollback plan
   - known-risk playbook.

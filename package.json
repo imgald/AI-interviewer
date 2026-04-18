@@ -19,7 +19,8 @@
     "eval:policies": "tsx src/scripts/eval-policies.ts",
     "eval:system-design": "tsx src/scripts/eval-system-design.ts",
     "eval:system-design:weekly": "tsx src/scripts/eval-system-design-weekly.ts",
-    "check:system-design-gates": "tsx src/scripts/check-system-design-gates.ts"
+    "check:system-design-gates": "tsx src/scripts/check-system-design-gates.ts",
+    "check:system-design-alerts": "tsx src/scripts/check-system-design-alerts.ts"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.0",
