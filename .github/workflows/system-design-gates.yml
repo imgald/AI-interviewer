@@ -1,0 +1,41 @@
+name: system-design-gates
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  quality-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run system-design scoring/report tests
+        run: >
+          npx vitest run --reporter=basic
+          src/lib/scoring/calculateUnifiedScore.test.ts
+          src/lib/scoring/pivot.test.ts
+          src/lib/scoring/confidence.test.ts
+          src/lib/scoring/gap.test.ts
+          src/lib/evaluation/system-design-calibration.test.ts
+          src/lib/evaluation/report.test.ts
+          src/lib/assistant/system_design_decision.test.ts
+          src/lib/assistant/policy-regression.test.ts
+          src/lib/evaluation/system-design-drift.test.ts
+
+      - name: Run system-design quality gates
+        run: npm run check:system-design-gates

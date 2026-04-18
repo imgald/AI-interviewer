@@ -255,6 +255,9 @@ npm run eval:system-design -- --out artifacts/system-design-eval.json
 
 # weekly snapshot + drift trend (writes to docs/metrics/system-design-weekly/)
 npm run eval:system-design:weekly
+
+# enforce release gates (calibration + regression + stability thresholds)
+npm run check:system-design-gates
 ```
 
 ## Current Test Coverage
@@ -467,13 +470,38 @@ Current progress:
 - In progress:
   - None (Roadmap v2.3 execution scope closed)
 
-Closure verification (2026-04-17):
+Closure verification (2026-04-18):
 - Vitest matrix passed (`61` tests): scoring core (`caps/pivot/confidence/gap`), system-design decisioning, policy regression, report, and drift modules.
 - `npm run eval:system-design` completed with:
+  - calibration accuracy improved to `0.75` (from `0.58`)
   - regression health pass rate `1.00`
   - replay stability across `21` scenarios with zero expectation flips and zero score/reward variance in deterministic replay.
 - `npm run eval:system-design:weekly` completed and generated:
-  - [snapshot-2026-04-17.json](docs/metrics/system-design-weekly/snapshot-2026-04-17.json)
+  - [snapshot-2026-04-18.json](docs/metrics/system-design-weekly/snapshot-2026-04-18.json)
   - [latest.json](docs/metrics/system-design-weekly/latest.json)
-  - drift summary: stable (`calibration_delta=0.00`, `pass_rate_delta=0.00`).
+  - drift summary: stable (`calibration_delta=+0.17`, `pass_rate_delta=0.00`).
+- CI merge-gate workflow added:
+  - [.github/workflows/system-design-gates.yml](.github/workflows/system-design-gates.yml)
+- `P1` report UX validation updates:
+  - evidence-pin anchor ids are now centralized and consistent between pin links and transcript highlights
+  - radar chart readability improved with responsive layout, padded viewBox, and wrapped inward label alignment
+
+### Final Closure Checklist (Priority-Ordered)
+
+- [x] `P0` Roadmap v2.3 engineering closure (`P0~P7`) completed and pushed to `main`.
+- [x] Unified scoring/report/regression deterministic replay is green on local verification matrix.
+- [x] `P0` Raise calibration accuracy from baseline (`0.58`) to release threshold (`>=0.70`) via non-symmetric calibration scoring (`current=0.75`).
+- [x] `P0` Promote evaluation gates into CI merge blockers:
+  - required vitest suites (scoring, decision, report, regression)
+  - `check:system-design-gates` thresholds (`accuracy`, `passRate`, `variance`, `expectationFlips`).
+- [x] `P1` Final report UX validation pass:
+  - evidence pin click-through and text pointer jump checks
+  - radar readability checks across common viewport sizes.
+- [ ] `P1` Production monitoring baseline:
+  - calibration/pass-rate/drift dashboards
+  - alert thresholds and on-call response notes.
+- [ ] `P1` Release runbook completion:
+  - go-live checklist
+  - rollback plan
+  - known-risk playbook.
 

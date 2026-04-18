@@ -192,7 +192,11 @@ export function evaluateSystemDesignCalibrationPack(
   labels: SystemDesignCalibrationLabel[] = SYSTEM_DESIGN_CALIBRATION_PACK,
 ) {
   const perSample = labels.map((label) => {
-    const predicted = predictLevelFromDimensions(label.dimensions);
+    const predicted = predictLevelFromCalibrationSignals({
+      dimensions: label.dimensions,
+      hire: label.hire,
+      pivotMoments: label.pivotMoments,
+    });
     return {
       id: label.id,
       expectedLevel: label.level,
@@ -212,7 +216,21 @@ export function evaluateSystemDesignCalibrationPack(
   };
 }
 
-function predictLevelFromDimensions(dimensions: SystemDesignCalibrationLabel["dimensions"]) {
+type CalibrationPredictInput = {
+  dimensions: SystemDesignCalibrationLabel["dimensions"];
+  hire: SystemDesignCalibrationLabel["hire"];
+  pivotMoments: number;
+};
+
+const HIRE_LEVEL_SHIFT: Record<SystemDesignCalibrationLabel["hire"], number> = {
+  NO_HIRE: 0.36,
+  BORDERLINE: 0.14,
+  HIRE: -0.08,
+  STRONG_HIRE: -0.22,
+};
+
+function predictLevelFromCalibrationSignals(input: CalibrationPredictInput) {
+  const { dimensions, hire, pivotMoments } = input;
   const avg =
     (dimensions.requirement_clarity +
       dimensions.capacity_instinct +
@@ -221,11 +239,17 @@ function predictLevelFromDimensions(dimensions: SystemDesignCalibrationLabel["di
       dimensions.bottleneck_sensitivity) /
     5;
 
-  let predicted: "Mid-level" | "Senior" | "Staff" = avg >= 4.2 ? "Staff" : avg >= 3.4 ? "Senior" : "Mid-level";
-  if (predicted === "Staff" && dimensions.tradeoff_depth < 4) {
+  // Normalize by final interview outcome to estimate interview target level.
+  const normalizedScore = avg + HIRE_LEVEL_SHIFT[hire] + Math.min(0.08, pivotMoments * 0.02);
+
+  let predicted: "Mid-level" | "Senior" | "Staff" =
+    normalizedScore >= 4.08 ? "Staff" : normalizedScore >= 3.26 ? "Senior" : "Mid-level";
+
+  // Staff guardrails stay non-linear even after normalization.
+  if (predicted === "Staff" && dimensions.tradeoff_depth < 3.95) {
     predicted = "Senior";
   }
-  if (predicted === "Staff" && dimensions.capacity_instinct < 4) {
+  if (predicted === "Staff" && dimensions.capacity_instinct < 3.95) {
     predicted = "Senior";
   }
   return predicted;

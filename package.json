@@ -18,7 +18,8 @@
     "worker:persona": "tsx src/workers/persona-worker.ts",
     "eval:policies": "tsx src/scripts/eval-policies.ts",
     "eval:system-design": "tsx src/scripts/eval-system-design.ts",
-    "eval:system-design:weekly": "tsx src/scripts/eval-system-design-weekly.ts"
+    "eval:system-design:weekly": "tsx src/scripts/eval-system-design-weekly.ts",
+    "check:system-design-gates": "tsx src/scripts/check-system-design-gates.ts"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.0",

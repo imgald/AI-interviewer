@@ -24,6 +24,7 @@ describe("system design calibration pack", () => {
     expect(result.total).toBeGreaterThan(0);
     expect(result.accuracy).toBeGreaterThanOrEqual(0);
     expect(result.accuracy).toBeLessThanOrEqual(1);
+    expect(result.accuracy).toBeGreaterThanOrEqual(0.7);
     expect(result.perSample.length).toBe(result.total);
   });
 });

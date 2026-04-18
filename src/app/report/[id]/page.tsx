@@ -806,7 +806,7 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
           <h2 style={sectionTitleStyle}>System Design Assessment</h2>
           {systemDesignDna ? (
             <div style={{ display: "grid", gap: 14 }}>
-              <div style={{ display: "grid", gap: 12, gridTemplateColumns: "minmax(280px, 1fr) minmax(280px, 1fr)" }}>
+              <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
                 <SystemDesignRadar dimensions={systemDesignDimensionRows} maxScore={5} />
                 <div style={{ display: "grid", gap: 10 }}>
                   <MetricRow label="Level Recommendation" value={systemDesignDna.levelRecommendation ?? "Mid-level"} />
@@ -938,7 +938,7 @@ export default async function SessionReportPage({ params }: ReportPageProps) {
                               typeof pointer.excerpt === "string" && pointer.excerpt.trim().length > 0
                                 ? ` "${pointer.excerpt.trim()}"`
                                 : "";
-                            const anchorId = `sd-pointer-${index}-${pointerIndex}`;
+                            const anchorId = buildSystemDesignPointerAnchorId(index, pointerIndex);
                             return (
                               <a key={`sd-evidence-pointer-${index}-${pointerIndex}`} href={`#${anchorId}`} style={pointerLinkStyle}>
                                 {turnId}[{start}:{length}]{excerpt}
@@ -2071,22 +2071,27 @@ function SystemDesignRadar({
     );
   }
 
-  const center = 140;
-  const radius = 96;
-  const labelRadius = radius + 14;
+  const viewBoxSize = 360;
+  const center = viewBoxSize / 2;
+  const radius = 112;
+  const labelRadius = radius + 40;
   const axes = dimensions.map((dimension, index) => {
     const angle = (Math.PI * 2 * index) / dimensions.length - Math.PI / 2;
     const axisX = center + Math.cos(angle) * radius;
     const axisY = center + Math.sin(angle) * radius;
     const rawLabelX = center + Math.cos(angle) * labelRadius;
-    const labelX = Math.max(38, Math.min(242, rawLabelX));
+    const labelX = Math.max(36, Math.min(viewBoxSize - 36, rawLabelX));
     const labelY = center + Math.sin(angle) * labelRadius;
+    const labelAnchor = Math.cos(angle) > 0.2 ? "end" : Math.cos(angle) < -0.2 ? "start" : "middle";
+    const labelLines = dimension.label.split(" ");
     return {
       ...dimension,
       axisX,
       axisY,
       labelX,
       labelY,
+      labelAnchor,
+      labelLines,
       angle,
     };
   });
@@ -2107,10 +2112,10 @@ function SystemDesignRadar({
     <div style={{ ...listItemStyle, display: "grid", gap: 10 }}>
       <strong>Five-Dimension Radar</strong>
       <svg
-        viewBox="0 0 280 280"
+        viewBox={`0 0 ${viewBoxSize} ${viewBoxSize}`}
         role="img"
         aria-label="System design dimension radar"
-        style={{ width: "100%", height: "auto", overflow: "visible" }}
+        style={{ width: "min(100%, 560px)", height: "auto", overflow: "visible", margin: "0 auto", display: "block" }}
       >
         {ringRadii.map((ring) => (
           <circle
@@ -2144,14 +2149,18 @@ function SystemDesignRadar({
           <text
             key={`radar-label-${axis.key}`}
             x={axis.labelX}
-            y={axis.labelY}
-            textAnchor="middle"
+            y={axis.labelY - (axis.labelLines.length - 1) * 4}
+            textAnchor={axis.labelAnchor}
             dominantBaseline="middle"
-            fontSize="8"
+            fontSize="7"
             fontWeight="600"
             fill="#2d3550"
           >
-            {axis.label}
+            {axis.labelLines.map((line, lineIndex) => (
+              <tspan key={`radar-label-${axis.key}-line-${lineIndex}`} x={axis.labelX} dy={lineIndex === 0 ? 0 : 10}>
+                {line}
+              </tspan>
+            ))}
           </text>
         ))}
       </svg>
@@ -2283,7 +2292,7 @@ function buildSystemDesignPointerRefs(dna: SystemDesignDna): TranscriptPointerRe
         return;
       }
       refs.push({
-        anchorId: `sd-pointer-${pinIndex}-${pointerIndex}`,
+        anchorId: buildSystemDesignPointerAnchorId(pinIndex, pointerIndex),
         dimensionLabel,
         turnId: pointer.turnId.trim(),
         start: typeof pointer.start === "number" ? pointer.start : 0,
@@ -2293,6 +2302,10 @@ function buildSystemDesignPointerRefs(dna: SystemDesignDna): TranscriptPointerRe
     });
   });
   return refs;
+}
+
+function buildSystemDesignPointerAnchorId(pinIndex: number, pointerIndex: number) {
+  return `sd-pointer-${pinIndex}-${pointerIndex}`;
 }
 
 function buildTranscriptDrilldownRows(input: {
@@ -3032,6 +3045,7 @@ const pointerMarkStyle = {
   borderRadius: 4,
   padding: "0 2px",
   border: "1px solid rgba(184, 110, 0, 0.35)",
+  scrollMarginTop: 84,
 } as const;
 
 function replayCardStyle(tone: ReplayItem["tone"]) {
