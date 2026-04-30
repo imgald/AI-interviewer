@@ -1,5 +1,6 @@
 ﻿import Link from "next/link";
 import { notFound } from "next/navigation";
+import type { ReactNode } from "react";
 import { buildMemoryLedger } from "@/lib/assistant/memory_ledger";
 import { summarizeSessionCritic, type SessionCriticSummary } from "@/lib/assistant/session_critic";
 import { getCommittedTranscriptSegments, summarizeTranscriptTruth } from "@/lib/session/commit-arbiter";
@@ -2107,7 +2108,8 @@ function SystemDesignRadar({
     const rawLabelX = center + Math.cos(angle) * labelRadius;
     const labelX = Math.max(36, Math.min(viewBoxSize - 36, rawLabelX));
     const labelY = center + Math.sin(angle) * labelRadius;
-    const labelAnchor = Math.cos(angle) > 0.2 ? "end" : Math.cos(angle) < -0.2 ? "start" : "middle";
+    const labelAnchor: "start" | "middle" | "end" =
+      Math.cos(angle) > 0.2 ? "end" : Math.cos(angle) < -0.2 ? "start" : "middle";
     const labelLines = dimension.label.split(" ");
     return {
       ...dimension,
@@ -2231,7 +2233,7 @@ function normalizeSystemDesignDna(value: unknown): SystemDesignDna | null {
   const reliability = numericValue(record.reliability_awareness);
   const bottleneck = numericValue(record.bottleneck_sensitivity);
 
-  if ([requirement, capacity, tradeoff, reliability, bottleneck].some((score) => score === null)) {
+  if (requirement === null || capacity === null || tradeoff === null || reliability === null || bottleneck === null) {
     return null;
   }
 
@@ -2381,7 +2383,7 @@ function renderTranscriptWithPointers(text: string, pointers: TranscriptPointerR
     return text;
   }
 
-  const rendered: Array<string | JSX.Element> = [];
+  const rendered: ReactNode[] = [];
   let cursor = 0;
 
   normalized.forEach((pointer, index) => {
@@ -3064,7 +3066,8 @@ const transcriptTurnCardStyle = {
 } as const;
 
 const pointerLinkStyle = {
-  ...mutedParagraphStyle,
+  margin: 0,
+  lineHeight: 1.6,
   color: "var(--accent-strong)",
   textDecoration: "underline",
   textUnderlineOffset: 3,

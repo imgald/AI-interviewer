@@ -17,6 +17,26 @@ function toStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+function toExplorerLevelTarget(question: {
+  type: string;
+  levelTarget: string | null;
+}): QuestionExplorerItem["levelTarget"] {
+  if (question.type === "SYSTEM_DESIGN") {
+    return "N/A";
+  }
+
+  switch (question.levelTarget) {
+    case "NEW_GRAD":
+    case "SDE1":
+    case "SDE2":
+    case "SENIOR":
+    case "STAFF":
+      return question.levelTarget;
+    default:
+      return "SDE2";
+  }
+}
+
 export default async function QuestionsPage(_props: QuestionsPageProps) {
   const questions = await prisma.question.findMany({
     where: { isActive: true },
@@ -34,7 +54,7 @@ export default async function QuestionsPage(_props: QuestionsPageProps) {
       title: question.title,
       type: question.type,
       difficulty: question.difficulty,
-      levelTarget: question.type === "SYSTEM_DESIGN" ? "N/A" : (question.levelTarget ?? "SDE2"),
+      levelTarget: toExplorerLevelTarget(question),
       companyStyle: question.companyStyle ?? "GENERIC",
       estimatedMinutes: question.estimatedMinutes ?? null,
       topicTags: toStringArray(question.topicTags),

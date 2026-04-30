@@ -1,0 +1,542 @@
+﻿# AI Interviewer
+
+Voice-first mock interview app for North American SDE interview prep, currently centered on coding interviews, a stage-governed AI interviewer, and an optional public interviewer persona flow.
+
+## Current Status
+
+This repo now has a working MVP-plus skeleton with:
+
+- `Next.js + TypeScript` app router frontend and API routes
+- `Postgres + Redis` local infra via Docker Compose
+- `Prisma` data model for sessions, interviewer profiles, persona context, evaluations, and event history
+- Optional interviewer profile setup flow
+- `BullMQ`-backed persona ingestion queue with a worker process
+- Persona queue observability in both setup UI and admin dashboard
+- Interview room with transcript persistence, stage-governed assistant turns, Monaco editor, local code execution, and streaming AI replies
+- Lightweight evaluation/report v0 with stage journey, replay markers, dimension scores, strengths, weaknesses, actionable improvements, and product-facing candidate profiling
+- Snapshot-first report/admin pipeline with canonical candidate-state and interviewer-decision snapshots, plus shared replay evidence across report and admin
+- Snapshot-first admin summary plus stage-grouped replay UI in the standalone report page
+- Intent-first + trajectory-aware interviewer control path with persisted intent/trajectory snapshots and session-level critic summaries surfaced in report/admin
+- Default interviewer skills layer for tone, pacing, follow-up discipline, and coaching-without-spoiling
+- Browser voice loop with interruption handling, continuous listening, and turn-taking policies
+- Dedicated STT handoff for spoken candidate turns, with provider selection and browser transcript fallback
+- Dedicated STT-backed voice mode with provider-led turn detection, provider preview drafts, usage logging, low-cost mode controls, and switchable STT providers
+- `Vitest` unit/route tests and `Playwright` end-to-end tests
+- Full `Vitest` coverage is now green locally again (`198 passed / 38 files`), so test validation is part of the normal development loop rather than a blocked follow-up task.
+
+## Recent Progress
+
+- System design interviewer `Phase 0/1/2/3/4/5/6/7/8/9` is completed (including report radar/evidence view and whiteboard aux-only observability).
+- Stage control is mode-aware, and system design includes API contract gating + on-demand capacity gating.
+- Design signals (`requirements/capacity/tradeoff/SPOF/bottleneck`) are extracted with evidence refs and visible in admin snapshots.
+- System design decision path is now separated from coding decision flow to avoid regressions while still reusing shared conversation-quality controls.
+- Full detailed log of recent changes moved to:
+  - [docs/changelog/2026-04-11-progress-archive.md](docs/changelog/2026-04-11-progress-archive.md)
+
+## Known Limits (Short-Term)
+
+- System design signal detection still relies on heuristic text patterns for some cases (for example nuanced handwave detection).
+- System design reward/scoring is now wired into report attribution, but still uses heuristic components and should be calibrated with more real transcripts.
+
+## Latest Interviewer Quality Upgrades
+
+- Decision flow uses `signals + intent + trajectory + pass conditions + pacing`.
+- Snapshot-first admin/report pipeline is the source of truth for replay and evidence.
+- Turn quality control includes critic pass, pressure-aware decisioning, and closure semantics.
+- Detailed upgrade history is archived in:
+  - [docs/changelog/2026-04-11-progress-archive.md](docs/changelog/2026-04-11-progress-archive.md)
+
+## What Works Today
+
+### Product Flow
+
+- `/setup`
+  - Choose interview mode, level, language, company style, difficulty, and voice toggle
+  - Choose whether to run in `low-cost mode`
+  - Optionally paste a public interviewer profile URL
+  - Analyze the profile and watch queue state move through setup UI
+- `/interview/[id]`
+  - Session room renders selected question and interviewer context
+  - Browser speech recognition remains available as fallback
+  - When a dedicated STT provider is configured, spoken candidate turns can be handled in a provider-first voice mode
+  - Provider preview drafts can appear live while speaking
+  - Spoken candidate turns can be re-transcribed through a dedicated STT provider before persistence, with browser transcript fallback
+  - When provider-backed LLM turns fail or hit rate limits, the room can explain why the turn fell back to the local interviewer
+  - AI assistant turns can be generated from recent transcript, current stage, persona context, latest code run, and policy state
+  - AI replies stream into the UI over `SSE`
+  - Browser TTS speaks AI replies with a queued utterance model
+  - Candidate speech can interrupt AI playback and generation
+  - Continuous listening mode can auto-submit candidate turns after a content-aware silence threshold
+  - Room UI shows approximate LLM/STT usage counts and estimated session cost
+  - Monaco editor is wired for coding sessions
+  - Local sandbox execution supports Python and JavaScript today
+  - Feedback report v0 can be generated in-room and reloaded from persisted session data
+- `/report/[id]`
+  - Shows standalone evaluation summary and recommendation
+  - Displays dimension scores and actionable improvements
+  - Replays key session moments such as stage transitions, signal snapshots, interviewer decisions, hint delivery, code runs, and final feedback generation
+  - Shares the same candidate-state evidence backbone as `/admin`
+- `/admin`
+  - Inspect recent interviewer profiles
+  - View raw queue job state
+  - View persona pipeline events
+  - View unified persona and session operations feed with readable lifecycle descriptions
+  - Inspect the latest session summary, candidate state, interviewer decision, and a session-state timeline
+
+### Backend Flow
+
+- `POST /api/interviewer-profiles/preview`
+- `POST /api/interviewer-profiles`
+- `GET /api/interviewer-profiles/:id`
+- `GET /api/interviewer-profiles/:id/job`
+- `GET /api/interviewer-profiles/:id/events`
+- `POST /api/sessions`
+- `GET /api/sessions/:id`
+- `POST /api/sessions/:id/assistant-turn`
+- `POST /api/sessions/:id/assistant-turn/stream`
+- `GET /api/sessions/:id/transcripts`
+- `POST /api/sessions/:id/transcripts`
+- `GET /api/sessions/:id/events`
+- `POST /api/sessions/:id/events`
+- `GET /api/sessions/:id/code-runs`
+- `POST /api/sessions/:id/code-runs`
+- `GET /api/sessions/:id/report`
+- `POST /api/sessions/:id/report`
+- `GET /api/stt/status`
+- `POST /api/stt/transcribe`
+- `GET /api/health`
+- `GET /api/health/db`
+
+### Queue Behavior
+
+- Persona ingestion jobs run through `BullMQ`
+- Worker supports simulated scenarios for local development:
+  - normal success
+  - transient retry then success
+  - final failure with fallback
+- Queue and worker events are written to `PersonaJobEvent`
+
+## Local Architecture
+
+### App Layer
+
+- `src/app/setup/page.tsx`
+- `src/app/interview/[id]/page.tsx`
+- `src/app/report/[id]/page.tsx`
+- `src/app/admin/page.tsx`
+
+### Core Libraries
+
+- `src/lib/db.ts`: Prisma client
+- `src/lib/redis.ts`: Redis connection
+- `src/lib/health.ts`: DB and Redis health aggregation
+- `src/lib/admin/ops.ts`: admin dashboard data aggregation
+- `src/lib/assistant/stages.ts`: coding interview stage inference and progression helpers
+- `src/lib/assistant/signal_extractor.ts`: structured candidate-state extraction with provider-backed observation and heuristic fallback
+- `src/lib/assistant/decision_engine.ts`: candidate-state-driven interviewer decision selection
+- `src/lib/assistant/interviewer_intent.ts`: interviewer intent inference for validate/probe/guide/unblock/advance/close turns
+- `src/lib/assistant/trajectory_estimator.ts`: candidate trajectory estimation and intervention-value scoring
+- `src/lib/assistant/reply_strategy.ts`: action-specific interviewer wording and fallback turn shaping
+- `src/lib/assistant/policy.ts`: explicit stage policy, exit criteria, hint escalation, and prompt strategy selection
+- `src/lib/assistant/generate-turn.ts`: multi-provider assistant turn generation, provider sequencing, critic-aware rewrite passes, and decision-compliance enforcement
+- `src/lib/assistant/critic.ts`: structured interviewer-turn review for specificity, intensity, repetition, code-readiness gating, evidence saturation, and “worth asking now” timing checks
+- `src/lib/assistant/session_critic.ts`: session-level interviewer QA summary for redundancy, interruption, pressure balance, timing, flow, and closure
+- `src/lib/assistant/pacing.ts`: explicit pacing assessment for implementation urgency, evidence sufficiency, question worth, pressure selection, and closure timing
+- `src/lib/assistant/pass_conditions.ts`: topic/stage pass-condition evaluation for implementation, testing, complexity, and wrap-up
+- `src/lib/assistant/hinting_ledger.ts`: hint granularity, rescue-mode classification, and hint-cost aggregation
+- `src/lib/usage/cost.ts`: rough token/audio cost estimation and session usage summaries
+- `src/lib/usage/budget.ts`: session budget guardrail and budget-cap closure messaging
+- `src/lib/evaluation/report.ts`: snapshot-aware, rubric-driven report generation with evidence trace, execution-aware scoring, candidate DNA profiling, and moment-of-truth extraction
+- `src/lib/session/snapshots.ts`: best-effort persistence plus snapshot-first read helpers for candidate-state, interviewer-decision, intent, and trajectory snapshots
+- `src/lib/session/state.ts`: canonical snapshot-state aggregation for report/admin consumers, including intent and trajectory summaries
+- `src/lib/session/budget-enforcement.ts`: budget-cap closure handling for assistant turns
+- `src/lib/persona/queue.ts`: BullMQ queue helpers
+- `src/lib/persona/ingest-public-profile.ts`: public-profile fetching, heuristic extraction, and persona synthesis with graceful fallback
+- `src/lib/persona/job-events.ts`: persona event persistence
+- `src/lib/voice/browser-voice-adapter.ts`: browser speech recognition and synthesis adapter
+- `src/lib/voice/turn-taking.ts`: interruption-aware silence and commit timing policy
+
+### Worker
+
+- `src/workers/persona-worker.ts`
+
+### Database
+
+- Prisma schema: `prisma/schema.prisma`
+- Migrations:
+  - `prisma/migrations/20260328000000_init`
+  - `prisma/migrations/20260328010000_persona_job_events`
+  - `prisma/migrations/20260328020000_session_state_snapshots`
+
+## Local Development
+
+### 1. Start Infra
+
+```powershell
+Set-Location 'E:\AI interviewer'
+docker compose up -d
+```
+
+### 2. Start App
+
+```powershell
+Set-Location 'E:\AI interviewer'
+npm run dev
+```
+
+### 3. Start Persona Worker
+
+In a second terminal:
+
+```powershell
+Set-Location 'E:\AI interviewer'
+npm run worker:persona
+```
+
+### 4. Open the App
+
+- Setup: [http://localhost:3000/setup](http://localhost:3000/setup)
+- Admin: [http://localhost:3000/admin](http://localhost:3000/admin)
+- Health: [http://localhost:3000/api/health](http://localhost:3000/api/health)
+
+## Environment Variables
+
+See `.env.example`
+
+```env
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/ai_interviewer?schema=public"
+REDIS_URL="redis://localhost:6379"
+LLM_PROVIDER=""
+GEMINI_API_KEY=""
+GEMINI_MODEL="gemini-2.5-flash"
+OPENAI_API_KEY=""
+OPENAI_MODEL="gpt-4.1-mini"
+OPENAI_STT_MODEL="gpt-4o-mini-transcribe"
+STT_PROVIDER=""
+ASSEMBLYAI_API_KEY=""
+ASSEMBLYAI_STT_MODELS="universal-3-pro,universal-2"
+ADMIN_DASHBOARD_TOKEN=""
+API_RATE_LIMIT_ENABLED="0"
+SESSION_CREATE_RATE_LIMIT_RPM="30"
+ASSISTANT_TURN_RATE_LIMIT_RPM="120"
+TRANSCRIPT_WRITE_RATE_LIMIT_RPM="240"
+EVENT_WRITE_RATE_LIMIT_RPM="240"
+```
+
+When STT credentials are configured:
+
+- `OPENAI_API_KEY` + `STT_PROVIDER=openai` (or no `STT_PROVIDER`) enables OpenAI STT
+- `ASSEMBLYAI_API_KEY` + `STT_PROVIDER=assemblyai` enables AssemblyAI STT
+- if both are present and `STT_PROVIDER` is unset, the app currently prefers AssemblyAI for dedicated STT
+- interviewer text generation can still use Gemini or OpenAI independently of the STT provider choice
+- optional hardening:
+  - set `ADMIN_DASHBOARD_TOKEN` to protect `/admin`
+  - set `API_RATE_LIMIT_ENABLED=1` to enforce mutation endpoint throttles with the RPM knobs above
+
+## Test Commands
+
+### Unit and Route Tests
+
+```powershell
+npm run test
+```
+
+### End-to-End Tests
+
+```powershell
+npm run test:e2e
+```
+
+### Production Build
+
+```powershell
+npm run build
+```
+
+### System Design Batch Evaluation
+
+```powershell
+# print calibration + regression summary JSON
+npm run eval:system-design
+
+# run real transcript calibration pack (JSONL labels)
+npm run eval:system-design:real -- --in data/system-design-calibration/real-transcripts.jsonl
+
+# optional: write snapshot JSON to a file
+npm run eval:system-design -- --out artifacts/system-design-eval.json
+
+# weekly snapshot + drift trend (writes to docs/metrics/system-design-weekly/)
+npm run eval:system-design:weekly
+
+# enforce release gates (calibration + regression + stability thresholds)
+npm run check:system-design-gates
+
+# evaluate warning/critical monitoring thresholds from weekly metrics snapshots
+npm run check:system-design-alerts
+```
+
+## Current Test Coverage
+
+### Vitest
+
+- Persona URL normalization
+- Persona source type detection
+- Health route behavior
+- Interviewer profile preview route behavior
+- Sessions route behavior
+- Assistant-turn fallback generation and stage-aware behavior
+- Interviewer intent inference and trajectory estimation
+- Reply strategy shaping and issue-aware fallback phrasing
+- Signal extraction and candidate-state reasoning
+- Decision-engine behavior for stuck/debugging/tradeoff/testing cases
+- Session-level critic summaries plus snapshot-first state aggregation
+- Stage inference, policy decisions, and prompt strategy behavior
+- Streaming assistant-turn route behavior
+- Voice turn-taking policy behavior
+- Session code-run route behavior
+- Session report route behavior
+- Evidence-based report generation
+- Admin unified feed aggregation
+
+### Playwright
+
+- Setup -> persona queue -> admin visibility
+- Setup -> tailored session creation -> interview room persona rendering
+
+## Known Limitations
+
+- Public persona ingestion now attempts real public-page fetching and heuristic extraction, but still falls back when sources are blocked, sparse, or hostile to scraping
+- Realtime AI conversation is still browser speech recognition plus `SSE` streaming rather than a full duplex low-latency voice stack
+- Browser speech recognition depends on Web Speech API availability and varies by browser
+- Dedicated STT and provider-first voice mode now support a switchable provider layer, with OpenAI and AssemblyAI options
+- Gemini and OpenAI interviewer turns can still hit provider rate limits; when that happens the system falls back to local interviewer heuristics
+- LLM-backed signal extraction uses the same provider availability rules, so observer quality may also degrade to heuristics under provider failure or rate limits
+- Live provider drafts are periodic previews rather than true token-level streaming ASR
+- Code execution still defaults to a local process unless Docker sandboxing is enabled, but now supports Python, JavaScript, and C++
+- Authentication is still stubbed around a demo user
+- Prisma generation on Windows can fail if `dev` or `worker` processes are locking the Prisma engine file.
+- After applying the 20260328020000_session_state_snapshots migration to the local Docker Postgres, session snapshot persistence now requires the app process to be restarted once if it had previously auto-disabled snapshot writes due to missing tables.
+
+## Execution View
+
+This README is intentionally condensed for fast context loading.
+
+### Snapshot (April 12, 2026)
+
+- System design interviewer `Phase 0/1/2/3/4/5/6/7/8/9`: baseline completed.
+- Question-bank launch now supports pre-room level selection for system-design interviews (`NEW_GRAD`, `SDE1`, `SDE2`, `SENIOR`, `STAFF`).
+- Report page now includes:
+  - System Design Assessment (radar + evidence pins)
+  - Whiteboard weak-signal observability (analysis only, excluded from decision path)
+- Report scoring guard fixed: no-evidence sessions cannot receive inflated system-design scores.
+
+### Local Test Reliability (EPERM Workaround)
+
+- Tests now run through a safe wrapper script: `scripts/run-vitest-safe.mjs`.
+- Behavior:
+  - runs Vitest with `vitest.config.mjs`
+  - if Windows `spawn EPERM` is detected, attempts `esbuild` unblock/repair automatically
+  - retries once and surfaces clear remediation guidance if still blocked
+- Prefer these commands:
+  - `npm run test`
+  - `npm run test:watch`
+
+### Detailed Docs
+
+- Full roadmap archive (moved from README):
+  - [Roadmap Archive](docs/roadmaps/roadmap-archive-2026-04-12.md)
+- Current system-design execution status and phase notes:
+  - [System Design Execution Plan](docs/roadmaps/roadmap-archive-2026-04-12.md#system-design-interviewer-execution-roadmap-v2-final-executable)
+- Monitoring and alert baseline:
+  - [System Design Monitoring Baseline](docs/operations/system-design-monitoring-baseline.md)
+- Release operations playbook:
+  - [Go-Live Runbook](docs/release/go-live-runbook.md)
+- Real transcript calibration dataset guide:
+  - [Real Transcript Calibration Pack](docs/datasets/system-design-calibration/README.md)
+
+### Roadmap v2.3: Unified Scoring & Calibration Phase (Execution)
+
+North-star goal:
+- Build a deterministic, explainable, replayable unified scoring core with asymmetric scoring logic.
+- Distinguish talent-led vs hint-led progress.
+- Explain why each level/verdict was assigned.
+- Keep behavior stable in Regression Lab (low variance, low drift).
+
+`P0` Scoring Core Definition:
+- Define unified IO in `src/lib/scoring/types.ts`:
+  - `ScoringInput { signals, gapState, pivots, noiseTags, metadata, decisionTrace, rewardTrace }`
+  - `EvaluationResult { rawLevel, cappedLevel, verdict, confidence, dimensionScores, appliedCaps, explanation }`
+- Implement scoring pipeline skeleton in `src/lib/scoring/calculateUnifiedScore.ts`:
+  - `prepareCleanContext`
+  - `aggregateDimensions`
+  - `calculatePivotAdjustment`
+  - `calculateGapPenalty`
+  - `applyHardCaps`
+  - `calculateConfidence`
+- DoD:
+  - idempotent output for identical input
+  - pure-function behavior (no DB/external dependency)
+  - unit-testable with mock input
+
+`P1` Pivot & Asymmetric Reward (Insight Engine):
+- Extend extraction and scoring:
+  - `insight_detected`, `pivot_moment`
+  - `src/lib/scoring/pivot.ts` with `calculatePivotAdjustment(pivots, decisionTrace)`
+- Encode:
+  - nudge strength (`NONE/LIGHT/HEAVY`)
+  - dimension weights
+  - impact thresholds
+  - `time_to_insight`
+  - `hints_before_insight`
+- DoD:
+  - no-hint insight increases raw level
+  - heavy rescue gives near-zero pivot lift
+
+`P2` Confidence Engine:
+- Implement `calculateConfidence()` with:
+  - signal density (`signals.length / expectedSignals`)
+  - noise ratio
+  - gap coverage (`closedGaps / totalGaps`)
+  - recovery-failure penalty (`heavy_rescue && gap_not_closed`)
+- Add dedupe, caps, and bounds.
+- DoD:
+  - talkative bullshitter => low confidence
+  - silent strong candidate => high confidence
+
+`P3` Hard Caps (Invariant Veto):
+- Implement in `src/lib/scoring/caps.ts`:
+  - `capByCapacityInstinct()`
+  - `capByTradeoffDepth()`
+  - `capByBottleneckSensitivity()`
+- Rule shape:
+  - `finalLevel = min(rawLevel, invariantCap)`
+  - examples: no capacity => cap `L4`, no tradeoff => cap `L5`, no bottleneck => cap `L4`
+- DoD:
+  - strong coding but weak design gets capped
+  - `appliedCaps` and explanation are explicit
+
+`P4` Gap->Score Causal Integration:
+- Implement `src/lib/scoring/gap.ts`:
+  - `penalty = f(severity, stage)`
+  - stage-aware weighting (early gap lighter, late gap heavier)
+- Keep decision linkage:
+  - capacity gate
+  - deep-dive guard
+- DoD:
+  - skipping capacity causes visible score drop
+  - late-stage unresolved gaps incur strong penalty
+
+`P5` Regression Lab (Convergence):
+- Build >=20 replay scenarios:
+  - Late Bloomer
+  - Bullshitter
+  - Strong Silent
+  - Rigid Coder
+  - Rescue-dependent
+- Track:
+  - level variance
+  - confidence variance
+  - diff before/after policy changes
+- DoD:
+  - low variance for repeated runs on same case
+  - diff report remains explainable
+
+`P6` Grilling Phase (Strong-only Pressure Test):
+- Trigger:
+  - `rawLevel >= L5 && confidence > threshold`
+- Behavior changes (evidence collection only):
+  - more bottleneck challenges
+  - lower pacing softness
+  - higher tradeoff probing intensity
+- Constraint:
+  - affects probing/collection only, not scoring math itself
+- DoD:
+  - strong candidates are pressure-tested
+  - average candidates are not over-pressured
+
+`P7` Report & Audit:
+- Turn report into an auditable verdict document:
+  - `strongest_signals`
+  - `blocking_dimensions`
+  - `pivot_effects`
+- Keep evidence drill-down with `TextPointer { turnId, start, length }`.
+- DoD:
+  - every conclusion has linked evidence
+  - click-through jump/highlight works end-to-end
+
+Execution order:
+- Week 1:
+  - `P0` scoring core skeleton
+  - `P3` hard caps
+- Week 2:
+  - `P1` pivot
+  - `P2` confidence
+- Week 3:
+  - `P4` gap integration
+  - `P5` regression lab
+- Week 4:
+  - `P6` grilling
+  - `P7` report & audit
+
+Current progress:
+- Completed:
+  - `P0` scoring core skeleton (`src/lib/scoring/types.ts`, `src/lib/scoring/calculateUnifiedScore.ts`)
+  - `P3` hard caps (`src/lib/scoring/caps.ts`, wired through unified scoring)
+  - `P1` pivot asymmetry integration (`src/lib/scoring/pivot.ts`, nudge conversion/time-to-insight/hints-before-insight outputs)
+  - `P2` confidence engine (`src/lib/scoring/confidence.ts`, signal density + noise ratio + gap coverage + recovery-failure penalty)
+  - `P4` gap->score causal integration (`src/lib/scoring/gap.ts`, severity × stage-aware penalties wired into unified scoring)
+  - `P5` regression lab expansion (`src/lib/assistant/policy-regression.ts`) with 20+ system-design scenarios, replay stability (variance) metrics, and eval-script outputs
+  - `P6` grilling phase trigger in system-design decisioning (`src/lib/assistant/system_design_decision.ts`) for strong senior/staff candidates during deep evidence collection
+  - `P7` report/audit enrichment (`src/lib/evaluation/report.ts`, `src/app/report/[id]/page.tsx`) with `strongest_signals`, `blocking_dimensions`, `pivot_effects` and evidence-linked drilldown
+- In progress:
+  - None (Roadmap v2.3 execution scope closed)
+
+Closure verification (2026-04-18):
+- Vitest matrix passed (`61` tests): scoring core (`caps/pivot/confidence/gap`), system-design decisioning, policy regression, report, and drift modules.
+- `npm run eval:system-design` completed with:
+  - calibration accuracy improved to `0.75` (from `0.58`)
+  - regression health pass rate `1.00`
+  - replay stability across `21` scenarios with zero expectation flips and zero score/reward variance in deterministic replay.
+- `npm run eval:system-design:weekly` completed and generated:
+  - [snapshot-2026-04-18.json](docs/metrics/system-design-weekly/snapshot-2026-04-18.json)
+  - [latest.json](docs/metrics/system-design-weekly/latest.json)
+  - drift summary: stable (`calibration_delta=+0.17`, `pass_rate_delta=0.00`).
+- CI merge-gate workflow added:
+  - [.github/workflows/system-design-gates.yml](.github/workflows/system-design-gates.yml)
+- `P1` report UX validation updates:
+  - evidence-pin anchor ids are now centralized and consistent between pin links and transcript highlights
+  - radar chart readability improved with responsive layout, padded viewBox, and wrapped inward label alignment
+- Monitoring + release operations assets added:
+  - [System Design Monitoring Baseline](docs/operations/system-design-monitoring-baseline.md)
+  - [Go-Live Runbook](docs/release/go-live-runbook.md)
+  - `npm run check:system-design-alerts`
+  - [.github/workflows/system-design-monitoring.yml](.github/workflows/system-design-monitoring.yml)
+- Real transcript calibration pipeline added:
+  - [Real Transcript Calibration Pack](docs/datasets/system-design-calibration/README.md)
+  - [Sample JSONL](docs/datasets/system-design-calibration/real-transcripts.sample.jsonl)
+  - `npm run eval:system-design:real -- --in data/system-design-calibration/real-transcripts.jsonl`
+- Polish items `2~5` closed:
+  - Report now exposes explicit `raw vs capped` level, verdict/confidence, and `Why Not Higher` reasoning.
+  - System-design level expectations are shown in both question launch and interview room.
+  - `/admin` includes weekly system-design monitoring snapshot and alert status.
+  - Mutation APIs support optional production rate-limiting (env-gated, off by default).
+
+### Final Closure Checklist (Priority-Ordered)
+
+- [x] `P0` Roadmap v2.3 engineering closure (`P0~P7`) completed and pushed to `main`.
+- [x] Unified scoring/report/regression deterministic replay is green on local verification matrix.
+- [x] `P0` Raise calibration accuracy from baseline (`0.58`) to release threshold (`>=0.70`) via non-symmetric calibration scoring (`current=0.75`).
+- [x] `P0` Promote evaluation gates into CI merge blockers:
+  - required vitest suites (scoring, decision, report, regression)
+  - `check:system-design-gates` thresholds (`accuracy`, `passRate`, `variance`, `expectationFlips`).
+- [x] `P1` Final report UX validation pass:
+  - evidence pin click-through and text pointer jump checks
+  - radar readability checks across common viewport sizes.
+- [x] `P1` Production monitoring baseline:
+  - calibration/pass-rate/drift dashboards
+  - alert thresholds and on-call response notes.
+- [x] `P1` Release runbook completion:
+  - go-live checklist
+  - rollback plan
+  - known-risk playbook.
+

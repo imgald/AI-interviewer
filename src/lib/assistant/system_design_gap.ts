@@ -1,5 +1,4 @@
 import type { HandwaveCategory } from "@/lib/assistant/depth";
-import type { SystemDesignPolicyAction } from "@/lib/assistant/policy";
 
 export type SystemDesignGapState = {
   missing_capacity: boolean;
@@ -72,7 +71,7 @@ export function countOpenSystemDesignGaps(gapState: SystemDesignGapState) {
 
 export function routeSystemDesignActionByGap(
   gapState: SystemDesignGapState,
-): SystemDesignPolicyAction | null {
+): "ASK_CAPACITY" | "PROBE_TRADEOFF" | "CHALLENGE_SPOF" | "ZOOM_IN" | null {
   const primaryGap = pickPrimarySystemDesignGap(gapState);
   switch (primaryGap) {
     case "capacity":

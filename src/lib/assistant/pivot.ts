@@ -111,13 +111,16 @@ function detectDesignSignalImprovement(events: SessionEventLike[]) {
   const snapshots = events
     .filter((event) => event.eventType === "SIGNAL_SNAPSHOT_RECORDED")
     .map((event) => asRecord(asRecord(asRecord(event.payloadJson).signals).designSignals).signals)
-    .map((signals) => ({
-      requirement_missing: booleanValue(signals.requirement_missing),
-      capacity_missing: booleanValue(signals.capacity_missing),
-      tradeoff_missed: booleanValue(signals.tradeoff_missed),
-      spof_missed: booleanValue(signals.spof_missed),
-      bottleneck_unexamined: booleanValue(signals.bottleneck_unexamined),
-    }))
+    .map((signals) => {
+      const signalRecord = asRecord(signals);
+      return {
+        requirement_missing: booleanValue(signalRecord.requirement_missing),
+        capacity_missing: booleanValue(signalRecord.capacity_missing),
+        tradeoff_missed: booleanValue(signalRecord.tradeoff_missed),
+        spof_missed: booleanValue(signalRecord.spof_missed),
+        bottleneck_unexamined: booleanValue(signalRecord.bottleneck_unexamined),
+      };
+    })
     .filter((item) => item !== null) as Array<{
     requirement_missing: boolean;
     capacity_missing: boolean;

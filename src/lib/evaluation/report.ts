@@ -2299,7 +2299,10 @@ function buildSystemDesignDna(input: {
     pivots: extractPivotInputsFromEvents(input.events),
     noiseTags: extractNoiseTagsFromEvents(input.events),
     metadata: {
-      stage: deriveCurrentSystemDesignStage(input.events),
+      stage: deriveCurrentSystemDesignStage({
+        events: input.events,
+        transcripts: input.transcripts,
+      }),
     },
     decisionTrace: extractDecisionTrace(input.events),
     rewardTrace: extractRewardTrace(input.events),

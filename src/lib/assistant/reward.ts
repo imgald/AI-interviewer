@@ -1,4 +1,5 @@
 import { detectPivotMoment, type NoiseTag } from "@/lib/assistant/pivot";
+import type { HandwaveCategory } from "@/lib/assistant/depth";
 import { countOpenSystemDesignGaps, deriveSystemDesignGapState } from "@/lib/assistant/system_design_gap";
 
 type SessionEventLike = {
@@ -329,7 +330,7 @@ function findLatestDesignSignals(
   spof_missed: boolean;
   bottleneck_unexamined: boolean;
   handwave_detected?: boolean;
-  handwave_categories?: string[];
+  handwave_categories?: HandwaveCategory[];
   handwave_low_detail_streak?: number;
 } | null {
   for (let i = events.length - 1; i >= 0; i -= 1) {
@@ -360,7 +361,7 @@ function findLatestDesignSignals(
         bottleneck_unexamined: designSignalValues.bottleneck_unexamined as boolean,
         handwave_detected: typeof handwave.detected === "boolean" ? (handwave.detected as boolean) : undefined,
         handwave_categories: Array.isArray(handwave.categories)
-          ? handwave.categories.filter((item): item is string => typeof item === "string")
+          ? handwave.categories.filter(isHandwaveCategory)
           : [],
         handwave_low_detail_streak:
           typeof handwave.lowDetailStreak === "number" ? handwave.lowDetailStreak : 0,
@@ -404,7 +405,7 @@ function detectNoiseTags(events: SessionEventLike[]): NoiseTag[] {
   return [...tags];
 }
 
-function applyHandwavePenalty(input: { missingCount: number; categories: string[]; lowDetailStreak: number }) {
+function applyHandwavePenalty(input: { missingCount: number; categories: HandwaveCategory[]; lowDetailStreak: number }) {
   let penalty = -0.3;
 
   if (input.missingCount >= 3) {
@@ -421,6 +422,14 @@ function applyHandwavePenalty(input: { missingCount: number; categories: string[
   }
 
   return clamp(round2(penalty), -1, 1);
+}
+
+function isHandwaveCategory(value: unknown): value is HandwaveCategory {
+  return (
+    value === "unjustified_component_choice" ||
+    value === "unquantified_scaling_claim" ||
+    value === "tradeoff_evasion"
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
